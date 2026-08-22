@@ -10,6 +10,12 @@ The repository contains:
 - `DOCS/VOBIZ_ANDROID_POC_DESIGN.md` — approved design;
 - `DOCS/SETUP_GUIDE.md` — configuration and run instructions.
 
+## Screenshots
+
+| Keypad | Recents | Settings — status | Settings — backend |
+| --- | --- | --- | --- |
+| <img src="screenshots/keypad.png" width="200" alt="Keypad screen with the dialer and SIP connected status" /> | <img src="screenshots/recents.png" width="200" alt="Recents screen listing recent outgoing calls" /> | <img src="screenshots/settings-status.png" width="200" alt="Settings screen showing SIP endpoint and backend status" /> | <img src="screenshots/settings-backend.png" width="200" alt="Settings screen showing backend configuration and call recording toggle" /> |
+
 ## Local verification
 
 ```bash
