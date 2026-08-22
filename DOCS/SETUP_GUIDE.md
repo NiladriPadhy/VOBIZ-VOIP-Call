@@ -46,6 +46,12 @@ Never put the Vobiz Auth ID or Auth Token in Android configuration.
 The Google Services Gradle plugin is applied only when `app/google-services.json`
 exists, so the Android project can still compile before Firebase is configured.
 
+Both files are mandatory for inbound calling in the background or terminated
+state. Without `app/google-services.json` the device never obtains a Firebase
+Installation ID, and without `backend/serviceAccountKey.json` the backend logs
+`Firebase Admin unavailable; push is disabled` and cannot wake the app. `GET
+/health` reports `"firebase": true` only when the service-account key loaded.
+
 ## 4. Run the backend
 
 ```bash
@@ -113,10 +119,18 @@ Grant microphone, notification, and nearby-device/Bluetooth permissions.
 1. Confirm the app shows `Ready`.
 2. Place an outbound call to a separate PSTN phone.
 3. Confirm ringing, answer, two-way audio, mute, speaker, DTMF, and hangup.
-4. Call the Vobiz number while the app is foregrounded.
+4. Call the Vobiz number while the app is foregrounded. The backend logs
+   `Inbound PSTN parked in conference; waking device via FCM`, the phone shows a
+   full-screen incoming call, and answering bridges two-way audio.
 5. Repeat while the app is backgrounded.
-6. Force-stop/terminate the app and repeat after confirming FCM delivery behavior.
+6. Swipe the app away from Recents and repeat. The high-priority FCM message
+   wakes the process, shows the incoming-call notification, and answering
+   registers on demand and joins the conference.
 7. Repeat on cellular data.
+
+The caller hears silence (or `CONFERENCE_WAIT_SOUND`) for the few seconds
+between answering the push and the app joining the conference. If nobody
+answers within 30 seconds the pending call expires and the caller is released.
 
 Do not test by calling the configured Vobiz caller ID from itself.
 
@@ -125,9 +139,20 @@ Do not test by calling the configured Vobiz caller ID from itself.
 - The native SIP implementation intentionally covers the Vobiz call path, not the
   complete SIP RFC surface.
 - Live Vobiz interoperability must be validated with sanitized SIP traces.
+- Every inbound PSTN call is bridged through a short-lived Vobiz conference so it
+  works identically whether the app is foreground, background, or terminated. The
+  app answers the FCM push, registers on demand, and dials the DID to join the
+  same room. There is no longer a direct `<Dial><User>` inbound path.
+- The app's SIP endpoint username must match the backend `SIP_ENDPOINT` user.
+  FCM wake-ups are keyed on that endpoint; a mismatch means the backend has no
+  installation ID to push to and the log shows `Inbound call cannot wake device`.
+- The device re-registers its Firebase Installation ID on every app launch, so a
+  backend restart is recovered the next time the app is opened.
 - The backend holds pending calls and FCM installation IDs in memory; restarting it clears them.
 - One endpoint/device and one concurrent pending call are the supported POC target.
 - A TURN service is required before restrictive-network behavior can be accepted.
 - Android full-screen call notifications remain subject to OS and Play policy.
-- A force-stopped Android app cannot receive FCM until the user launches it again;
-  this is an Android platform restriction, not a Vobiz behavior.
+- Swiping the app from Recents still delivers FCM, but a *force-stopped* app (via
+  App Info, or aggressive OEM battery managers) cannot receive FCM until the user
+  launches it again; exempt the app from battery optimization on such devices.
+  This is an Android platform restriction, not a Vobiz behavior.

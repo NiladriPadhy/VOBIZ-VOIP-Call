@@ -59,6 +59,7 @@ import com.enetro.vobizvoip.domain.CallCoordinator
 import com.enetro.vobizvoip.domain.CallPhase
 import com.enetro.vobizvoip.domain.CallUiState
 import com.enetro.vobizvoip.signaling.RegistrationState
+import com.google.firebase.installations.FirebaseInstallations
 import com.google.firebase.messaging.FirebaseMessaging
 
 @Composable
@@ -93,7 +94,17 @@ fun RootScreen(coordinator: CallCoordinator) {
     val onSaveConfig: (AppConfig) -> Unit = { config ->
         coordinator.saveConfig(config)
         permissionLauncher.launch(requiredPermissions())
-        runCatching { FirebaseMessaging.getInstance().register() }
+        registerForPush(coordinator)
+    }
+
+    // Re-assert this device's FCM installation ID on every launch once the
+    // endpoint is configured. The backend keeps installation IDs in memory, so
+    // without this a backend restart would silently stop waking the app for
+    // inbound calls until the user re-saved settings.
+    LaunchedEffect(state.config.isComplete) {
+        if (state.config.isComplete) {
+            registerForPush(coordinator)
+        }
     }
 
     when {
@@ -361,3 +372,15 @@ private fun requiredPermissions(): Array<String> = arrayOf(
     Manifest.permission.BLUETOOTH_CONNECT,
     Manifest.permission.POST_NOTIFICATIONS,
 )
+
+// Ensure FCM is registered and report the current Firebase Installation ID
+// (the target the backend pushes inbound-call wake-ups to) to the backend.
+// Guarded because Firebase throws if google-services.json is absent.
+private fun registerForPush(coordinator: CallCoordinator) {
+    runCatching {
+        FirebaseMessaging.getInstance().register()
+        FirebaseInstallations.getInstance().id.addOnSuccessListener { installationId ->
+            coordinator.registerInstallation(installationId)
+        }
+    }
+}

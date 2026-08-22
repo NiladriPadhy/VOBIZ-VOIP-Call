@@ -81,6 +81,7 @@ dependencies {
 
     implementation(platform("com.google.firebase:firebase-bom:34.18.0"))
     implementation("com.google.firebase:firebase-messaging")
+    implementation("com.google.firebase:firebase-installations")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")

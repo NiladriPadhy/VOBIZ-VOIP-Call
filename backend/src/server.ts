@@ -26,6 +26,9 @@ const env = z
     VOBIZ_AUTH_TOKEN: z.string().optional(),
     VOBIZ_API_BASE_URL: z.string().url().default("https://api.vobiz.ai"),
     FIREBASE_SERVICE_ACCOUNT_PATH: z.string().default("./serviceAccountKey.json"),
+    // Optional URL that returns wait-audio XML while the caller is parked in the
+    // conference before the app answers. When unset the caller hears silence.
+    CONFERENCE_WAIT_SOUND: z.string().url().optional(),
   })
   .parse(process.env);
 
@@ -135,6 +138,19 @@ app.post(
         );
         return;
       }
+      // Park the PSTN caller in a per-call conference and wake the device over
+      // FCM. This is the only inbound path that also works when the app is
+      // backgrounded or terminated: an offline endpoint cannot receive a direct
+      // SIP INVITE, so instead the app answers the push, registers on demand,
+      // and dials the DID to join the same conference (see /answer SIP-leg
+      // branch and POST /calls/:id/accept).
+      const pending = createPendingCall(caller, did, callUuid || undefined);
+      if (callUuid) {
+        directInboundByEndpoint.set(sipEndpointUser, {
+          callUuid,
+          active: true,
+        });
+      }
       logger.info(
         {
           from: redactIdentity(from),
@@ -144,25 +160,19 @@ app.post(
           routeType: routeType || "none",
           callUuid: callUuid || "none",
           endpoint: sipEndpointUser,
+          pendingCallId: pending.id,
+          roomId: pending.roomId,
         },
-        "Inbound PSTN answered; ringing registered SIP endpoint",
+        "Inbound PSTN parked in conference; waking device via FCM",
       );
-      if (callUuid) {
-        directInboundByEndpoint.set(sipEndpointUser, {
-          callUuid,
-          active: true,
-        });
-      }
+      await notifyIncomingCall(pending);
       const inboundRecord = recordByEndpoint.get(sipEndpointUser) ?? true;
       sendXml(
         response,
-        dialUserXml(
-          env.SIP_ENDPOINT,
-          caller,
-          did,
-          inboundRecord
-            ? recordVerb("incoming", normalizeNumber(from) ?? caller, sipEndpointUser)
-            : "",
+        conferenceParkXml(
+          pending.roomId,
+          normalizeNumber(from) ?? caller,
+          inboundRecord,
         ),
       );
       return;
@@ -184,7 +194,7 @@ app.post(
       if (pending && pending.expiresAt > Date.now()) {
         pending.status = "joined";
         pendingJoinByEndpoint.delete(endpoint);
-        sendXml(response, conferenceXml(pending.roomId));
+        sendXml(response, conferenceXml(pending.roomId, { endConferenceOnExit: true }));
         return;
       }
       pendingJoinByEndpoint.delete(endpoint);
@@ -318,6 +328,24 @@ app.post(
       );
     }
     response.sendStatus(204);
+  },
+);
+
+app.post(
+  `/webhooks/vobiz/${env.WEBHOOK_TOKEN}/conference-events`,
+  (request, response) => {
+    logger.info(
+      {
+        event: field(request, "Event"),
+        action: field(request, "ConferenceAction"),
+        conference: field(request, "ConferenceName"),
+        member: field(request, "ConferenceMemberID", "MemberID"),
+      },
+      "Conference lifecycle event",
+    );
+    // This is the Conference `action` URL, fetched once the participant leaves.
+    // Return an empty response so the leg simply ends.
+    sendXml(response, xmlResponse(""));
   },
 );
 
@@ -756,29 +784,6 @@ function dialNumberXml(destination: string, callerId: string, record = ""): stri
   );
 }
 
-function dialUserXml(
-  sipEndpoint: string,
-  caller: string,
-  did: string,
-  record = "",
-): string {
-  // callerId MUST be an account-owned DID. Vobiz refuses to originate the SIP
-  // B-leg when From is a foreign CLI, so real inbound callers die instantly
-  // while calls from owned numbers appear to work. The real caller is passed
-  // in callerName and X-VH-Caller (sipHeaders="Caller=..."). Use the DID from
-  // webhook To, not a server-wide env value.
-  const display = xmlEscape(caller);
-  return xmlResponse(
-    record +
-      `<Dial timeout="45" callerId="${xmlEscape(did)}" callerName="${display}" ` +
-      `dialMusic="real" ` +
-      `callbackUrl="${xmlEscape(`${webhookBaseUrl}/dial-events`)}" ` +
-      `callbackMethod="POST" action="${xmlEscape(`${webhookBaseUrl}/dial-result`)}" ` +
-      `method="POST" redirect="false">` +
-      `<User sipHeaders="Caller=${display}">${xmlEscape(sipEndpoint)}</User></Dial>`,
-  );
-}
-
 // Vobiz records the whole bridged session; RecordStop posts an MP3 URL to the
 // callback. Direction/number/endpoint are carried in the callback query so the
 // app can match a recording to its call-log entry without extra server state.
@@ -798,10 +803,54 @@ function recordVerb(
   );
 }
 
-function conferenceXml(roomId: string): string {
+// A Conference element that actually bridges audio on Vobiz. The `action`
+// attribute (NOT `callbackUrl`) is required: Vobiz only mixes the members when
+// `action` is present, and calls it once a member leaves. `endConferenceOnExit`
+// on a leg tears the room down for everyone when that leg hangs up, giving
+// normal two-party call semantics.
+function conferenceElement(
+  roomId: string,
+  options: { endConferenceOnExit?: boolean; waitSound?: string } = {},
+): string {
+  const attributes = [
+    `action="${xmlEscape(`${webhookBaseUrl}/conference-events`)}"`,
+    `method="POST"`,
+  ];
+  if (options.endConferenceOnExit) attributes.push(`endConferenceOnExit="true"`);
+  if (options.waitSound) {
+    attributes.push(
+      `waitSound="${xmlEscape(options.waitSound)}"`,
+      `waitMethod="POST"`,
+    );
+  }
+  return `<Conference ${attributes.join(" ")}>${xmlEscape(roomId)}</Conference>`;
+}
+
+function conferenceXml(
+  roomId: string,
+  options: { endConferenceOnExit?: boolean; waitSound?: string } = {},
+): string {
+  return xmlResponse(conferenceElement(roomId, options));
+}
+
+// XML returned to the inbound PSTN leg: optionally record the whole session
+// (matching the pre-conference recording behaviour), then hold the caller in
+// the conference until the app joins. `endConferenceOnExit` ends the call for
+// the caller if the app hangs up or if the caller drops.
+function conferenceParkXml(
+  roomId: string,
+  callerNumber: string,
+  record: boolean,
+): string {
+  const recording = record
+    ? recordVerb("incoming", callerNumber, sipEndpointUser)
+    : "";
   return xmlResponse(
-    `<Conference stayAlone="true">` +
-      `${xmlEscape(roomId)}</Conference>`,
+    recording +
+      conferenceElement(roomId, {
+        endConferenceOnExit: true,
+        waitSound: env.CONFERENCE_WAIT_SOUND,
+      }),
   );
 }
 
