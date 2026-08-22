@@ -20,10 +20,27 @@ class VobizMessagingService : FirebaseMessagingService() {
         val pendingCallId = message.data["pendingCallId"] ?: return
         val expiresAt = message.data["expiresAt"]?.toLongOrNull() ?: 0L
         if (expiresAt <= System.currentTimeMillis()) return
-        showIncomingCall(
-            pendingCallId = pendingCallId,
-            caller = message.data["caller"].orEmpty().ifBlank { "Unknown caller" },
-        )
+        val caller = message.data["caller"].orEmpty().ifBlank { "Unknown caller" }
+        if ((application as VobizApplication).isAppInForeground) {
+            // App is visible: skip the Answer/Decline notification and bring the
+            // in-app calling screen to the front. CallCoordinator plays the
+            // default ringtone once the INCOMING state is shown.
+            launchIncomingCallScreen(pendingCallId, caller)
+        } else {
+            showIncomingCall(pendingCallId, caller)
+        }
+    }
+
+    private fun launchIncomingCallScreen(pendingCallId: String, caller: String) {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            action = MainActivity.ACTION_SHOW_PENDING
+            putExtra(MainActivity.EXTRA_PENDING_CALL_ID, pendingCallId)
+            putExtra(MainActivity.EXTRA_CALLER, caller)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        startActivity(intent)
     }
 
     private fun showIncomingCall(pendingCallId: String, caller: String) {

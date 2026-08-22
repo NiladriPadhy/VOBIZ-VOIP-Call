@@ -34,8 +34,12 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         when (intent?.action) {
-            ACTION_SHOW_PENDING -> showPending(intent)
+            ACTION_SHOW_PENDING -> {
+                cancelIncomingNotification(intent)
+                showPending(intent)
+            }
             ACTION_ANSWER_PENDING -> {
+                cancelIncomingNotification(intent)
                 showPending(intent)
                 if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
                     PackageManager.PERMISSION_GRANTED
@@ -44,9 +48,9 @@ class MainActivity : ComponentActivity() {
                 }
             }
             ACTION_DECLINE_PENDING -> {
+                cancelIncomingNotification(intent)
                 showPending(intent)
                 coordinator.declinePendingInbound()
-                cancelIncomingNotification(intent)
             }
             ACTION_HANGUP -> coordinator.hangup()
         }
