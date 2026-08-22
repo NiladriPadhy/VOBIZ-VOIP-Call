@@ -1,0 +1,16 @@
+*.iml
+.gradle/
+.idea/
+local.properties
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+app/build/
+app/google-services.json
+backend/.env
+backend/serviceAccountKey.json
+backend/node_modules/
+backend/dist/
+*.jks
+*.keystore
