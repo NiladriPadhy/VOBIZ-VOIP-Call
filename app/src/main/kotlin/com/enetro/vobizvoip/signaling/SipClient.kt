@@ -397,12 +397,16 @@ class SipClient {
             "INVITE" -> handleIncomingInvite(request)
             "ACK" -> {
                 val dialog = activeDialog
-                if (
-                    dialog != null &&
+                val matches = dialog != null &&
                     dialog.callId == request.header("Call-ID") &&
                     !dialog.established
-                ) {
-                    activeDialog = dialog.copy(established = true)
+                Log.i(
+                    "VobizSip",
+                    "ACK received: matches=$matches; dialogCallId=${dialog?.callId}; " +
+                        "ackCallId=${request.header("Call-ID")}; established=${dialog?.established}",
+                )
+                if (matches) {
+                    activeDialog = dialog!!.copy(established = true)
                     _events.tryEmit(SipEvent.CallAccepted(null))
                 }
             }
@@ -615,6 +619,7 @@ class SipClient {
         dialog.routeSet.map { "Route" to it }
 
     private fun send(message: SipMessage) {
+        Log.i("VobizSip", "TX ${message.startLine}; Call-ID=${message.header("Call-ID") ?: "none"}")
         check(socket?.send(message.encode()) == true) { "SIP WebSocket is not connected" }
     }
 

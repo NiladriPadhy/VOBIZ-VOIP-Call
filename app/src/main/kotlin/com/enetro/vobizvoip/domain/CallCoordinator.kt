@@ -4,9 +4,14 @@ import android.content.Context
 import android.content.Intent
 import android.media.Ringtone
 import android.media.RingtoneManager
+import android.util.Log
 import androidx.core.content.ContextCompat
 import com.enetro.vobizvoip.data.AppConfig
 import com.enetro.vobizvoip.data.BackendApi
+import com.enetro.vobizvoip.data.CallDirection
+import com.enetro.vobizvoip.data.CallLogEntry
+import com.enetro.vobizvoip.data.CallLogStore
+import com.enetro.vobizvoip.data.CallResult
 import com.enetro.vobizvoip.data.SecureConfigStore
 import com.enetro.vobizvoip.media.WebRtcAudioSession
 import com.enetro.vobizvoip.service.CallForegroundService
@@ -26,6 +31,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import org.webrtc.PeerConnection
+import java.util.UUID
 
 enum class CallPhase {
     IDLE,
@@ -47,6 +53,14 @@ data class CallUiState(
     val speakerEnabled: Boolean = false,
     val error: String? = null,
     val pendingCallId: String? = null,
+    val connectedAtMillis: Long? = null,
+)
+
+private data class ActiveCallRecord(
+    val number: String,
+    val direction: CallDirection,
+    val startedAt: Long,
+    var connectedAt: Long? = null,
 )
 
 class CallCoordinator(
@@ -55,14 +69,19 @@ class CallCoordinator(
     private val sipClient: SipClient,
     private val webRtc: WebRtcAudioSession,
     private val backendApi: BackendApi,
+    private val callLogStore: CallLogStore,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val _state = MutableStateFlow(CallUiState(config = configStore.load()))
     private var incomingInvite: SipMessage? = null
     private var incomingRingtone: Ringtone? = null
     private var inboundStatusJob: Job? = null
+    private var activeCallRecord: ActiveCallRecord? = null
 
     val state: StateFlow<CallUiState> = _state
+    val callLog: StateFlow<List<CallLogEntry>> = callLogStore.entries
+
+    fun clearCallLog() = callLogStore.clear()
 
     init {
         scope.launch {
@@ -72,6 +91,19 @@ class CallCoordinator(
         }
         scope.launch {
             sipClient.events.collect(::handleSipEvent)
+        }
+        scope.launch {
+            var lastPhase: CallPhase? = null
+            _state.collect { current ->
+                if (current.phase != lastPhase) {
+                    Log.i(
+                        "VobizCall",
+                        "phase $lastPhase -> ${current.phase}; remote=${current.remoteNumber}; " +
+                            "pending=${current.pendingCallId}; connectedAt=${current.connectedAtMillis}",
+                    )
+                    lastPhase = current.phase
+                }
+            }
         }
         if (_state.value.config.isComplete) {
             sipClient.connect(_state.value.config)
@@ -105,6 +137,11 @@ class CallCoordinator(
             fail("Enter a destination in E.164 format, for example +919876543210")
             return
         }
+        activeCallRecord = ActiveCallRecord(
+            number = normalized,
+            direction = CallDirection.OUTGOING,
+            startedAt = System.currentTimeMillis(),
+        )
         startOutgoing(normalized, prepareBackend = true)
     }
 
@@ -116,6 +153,10 @@ class CallCoordinator(
             runCatching {
                 val answer = webRtc.answerOffer(invite.body, iceServers(_state.value.config))
                 sipClient.acceptIncoming(answer)
+                // The answering side is connected once the 200 OK is sent. Some
+                // WSS/PSTN paths never deliver the in-dialog ACK back to the app,
+                // so we must not gate the active state on receiving CallAccepted.
+                markCallActive()
             }.onFailure { fail(it.message ?: "Unable to answer call") }
         }
     }
@@ -123,7 +164,7 @@ class CallCoordinator(
     fun rejectIncoming() {
         stopIncomingRingtone()
         sipClient.rejectIncoming()
-        endLocally()
+        endLocally(CallResult.DECLINED)
     }
 
     fun hangup() {
@@ -154,6 +195,11 @@ class CallCoordinator(
     }
 
     fun showPendingInbound(pendingCallId: String, caller: String?) {
+        activeCallRecord = ActiveCallRecord(
+            number = caller ?: "Unknown caller",
+            direction = CallDirection.INCOMING,
+            startedAt = System.currentTimeMillis(),
+        )
         _state.update {
             it.copy(
                 phase = CallPhase.INCOMING,
@@ -191,7 +237,7 @@ class CallCoordinator(
         stopIncomingRingtone()
         scope.launch {
             runCatching { backendApi.declinePending(_state.value.config, pendingId) }
-            endLocally()
+            endLocally(CallResult.DECLINED)
         }
     }
 
@@ -215,6 +261,7 @@ class CallCoordinator(
                 remoteNumber = destination,
                 pendingCallId = null,
                 error = null,
+                connectedAtMillis = null,
             )
         }
         scope.launch {
@@ -229,6 +276,7 @@ class CallCoordinator(
     }
 
     private suspend fun handleSipEvent(event: SipEvent) {
+        Log.i("VobizCall", "sipEvent ${event::class.simpleName}; phase=${_state.value.phase}")
         when (event) {
             is SipEvent.IncomingInvite -> {
                 if (_state.value.phase != CallPhase.IDLE) {
@@ -236,6 +284,11 @@ class CallCoordinator(
                     return
                 }
                 incomingInvite = event.request
+                activeCallRecord = ActiveCallRecord(
+                    number = event.caller,
+                    direction = CallDirection.INCOMING,
+                    startedAt = System.currentTimeMillis(),
+                )
                 _state.update {
                     it.copy(
                         phase = CallPhase.INCOMING,
@@ -254,8 +307,7 @@ class CallCoordinator(
                     fail(it.message ?: "Remote media negotiation failed")
                     return
                 }
-                _state.update { it.copy(phase = CallPhase.ACTIVE) }
-                startCallService()
+                markCallActive()
             }
             SipEvent.CallEnded -> endLocally()
             is SipEvent.Failure -> {
@@ -263,6 +315,14 @@ class CallCoordinator(
                 fail(event.message + status)
             }
         }
+    }
+
+    private fun markCallActive() {
+        if (_state.value.phase == CallPhase.ACTIVE) return
+        val connectedAt = System.currentTimeMillis()
+        activeCallRecord?.connectedAt = connectedAt
+        _state.update { it.copy(phase = CallPhase.ACTIVE, connectedAtMillis = connectedAt) }
+        startCallService()
     }
 
     private fun startCallService() {
@@ -283,13 +343,14 @@ class CallCoordinator(
         )
     }
 
-    private fun endLocally() {
+    private fun endLocally(result: CallResult? = null) {
         inboundStatusJob?.cancel()
         inboundStatusJob = null
         stopIncomingRingtone()
         webRtc.close()
         stopCallService()
         incomingInvite = null
+        recordCall(result)
         _state.update {
             it.copy(
                 phase = CallPhase.IDLE,
@@ -297,6 +358,7 @@ class CallCoordinator(
                 muted = false,
                 speakerEnabled = false,
                 pendingCallId = null,
+                connectedAtMillis = null,
             )
         }
     }
@@ -307,7 +369,34 @@ class CallCoordinator(
         stopIncomingRingtone()
         webRtc.close()
         stopCallService()
-        _state.update { it.copy(phase = CallPhase.FAILED, error = message) }
+        recordCall(CallResult.FAILED)
+        _state.update { it.copy(phase = CallPhase.FAILED, error = message, connectedAtMillis = null) }
+    }
+
+    private fun recordCall(explicitResult: CallResult?) {
+        val record = activeCallRecord ?: return
+        activeCallRecord = null
+        val connectedAt = record.connectedAt
+        val durationSeconds = if (connectedAt != null) {
+            ((System.currentTimeMillis() - connectedAt) / 1000).coerceAtLeast(0)
+        } else {
+            0L
+        }
+        val result = explicitResult ?: when {
+            connectedAt != null -> CallResult.COMPLETED
+            record.direction == CallDirection.INCOMING -> CallResult.MISSED
+            else -> CallResult.CANCELED
+        }
+        callLogStore.add(
+            CallLogEntry(
+                id = UUID.randomUUID().toString(),
+                number = record.number,
+                direction = record.direction,
+                result = result,
+                startedAt = record.startedAt,
+                durationSeconds = durationSeconds,
+            ),
+        )
     }
 
     private fun startInboundStatusPolling() {

@@ -3,8 +3,9 @@
     <style name="Theme.VobizVoip" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowLightStatusBar">true</item>
-        <item name="android:statusBarColor">@android:color/white</item>
-        <item name="android:navigationBarColor">@android:color/white</item>
+        <item name="android:statusBarColor">#FAF7F5</item>
+        <item name="android:navigationBarColor">#FAF7F5</item>
+        <item name="android:windowBackground">#FAF7F5</item>
         <item name="android:colorAccent">#C9460B</item>
     </style>
 </resources>

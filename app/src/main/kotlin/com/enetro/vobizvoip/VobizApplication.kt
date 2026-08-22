@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import com.enetro.vobizvoip.data.BackendApi
+import com.enetro.vobizvoip.data.CallLogStore
 import com.enetro.vobizvoip.data.SecureConfigStore
 import com.enetro.vobizvoip.domain.CallCoordinator
 import com.enetro.vobizvoip.media.WebRtcAudioSession
@@ -28,7 +29,7 @@ class VobizApplication : Application() {
                     getString(R.string.incoming_call_channel),
                     NotificationManager.IMPORTANCE_HIGH,
                 ).apply {
-                    description = "Incoming Vobiz call alerts"
+                    description = "Incoming Enetro call alerts"
                     lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
                     enableVibration(true)
                 },
@@ -37,7 +38,7 @@ class VobizApplication : Application() {
                     getString(R.string.active_call_channel),
                     NotificationManager.IMPORTANCE_LOW,
                 ).apply {
-                    description = "Ongoing Vobiz call status"
+                    description = "Ongoing Enetro call status"
                     setSound(null, null)
                 },
             ),
@@ -57,5 +58,6 @@ class AppContainer(application: Application) {
         sipClient = SipClient(),
         webRtc = WebRtcAudioSession(application),
         backendApi = BackendApi(),
+        callLogStore = CallLogStore(application),
     )
 }

@@ -32,7 +32,7 @@ class VobizMessagingService : FirebaseMessagingService() {
         val declineIntent = callIntent(MainActivity.ACTION_DECLINE_PENDING, pendingCallId, caller)
         val notification = NotificationCompat.Builder(this, VobizApplication.INCOMING_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.sym_call_incoming)
-            .setContentTitle("Incoming Vobiz call")
+            .setContentTitle("Incoming Enetro call")
             .setContentText(caller)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_MAX)

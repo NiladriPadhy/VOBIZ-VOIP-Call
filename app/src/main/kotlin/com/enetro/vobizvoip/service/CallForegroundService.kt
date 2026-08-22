@@ -49,7 +49,7 @@ class CallForegroundService : Service() {
         )
         return NotificationCompat.Builder(this, VobizApplication.ACTIVE_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.sym_action_call)
-            .setContentTitle("Vobiz call in progress")
+            .setContentTitle("Enetro call in progress")
             .setContentText(remote)
             .setContentIntent(contentIntent)
             .setOngoing(true)
