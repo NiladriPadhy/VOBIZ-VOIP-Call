@@ -12,6 +12,7 @@ import com.enetro.vobizvoip.data.CallDirection
 import com.enetro.vobizvoip.data.CallLogEntry
 import com.enetro.vobizvoip.data.CallLogStore
 import com.enetro.vobizvoip.data.CallResult
+import com.enetro.vobizvoip.data.Recording
 import com.enetro.vobizvoip.data.SecureConfigStore
 import com.enetro.vobizvoip.media.WebRtcAudioSession
 import com.enetro.vobizvoip.service.CallForegroundService
@@ -77,11 +78,23 @@ class CallCoordinator(
     private var incomingRingtone: Ringtone? = null
     private var inboundStatusJob: Job? = null
     private var activeCallRecord: ActiveCallRecord? = null
+    private val _recordings = MutableStateFlow<List<Recording>>(emptyList())
 
     val state: StateFlow<CallUiState> = _state
     val callLog: StateFlow<List<CallLogEntry>> = callLogStore.entries
+    val recordings: StateFlow<List<Recording>> = _recordings
 
     fun clearCallLog() = callLogStore.clear()
+
+    fun refreshRecordings() {
+        val config = _state.value.config
+        if (!config.isComplete) return
+        scope.launch {
+            runCatching { backendApi.fetchRecordings(config) }
+                .onSuccess { _recordings.value = it }
+                .onFailure { Log.w("VobizCall", "Fetching recordings failed: ${it.message}") }
+        }
+    }
 
     init {
         scope.launch {
@@ -107,6 +120,7 @@ class CallCoordinator(
         }
         if (_state.value.config.isComplete) {
             sipClient.connect(_state.value.config)
+            refreshRecordings()
         }
     }
 
@@ -397,6 +411,14 @@ class CallCoordinator(
                 durationSeconds = durationSeconds,
             ),
         )
+        // A completed call is recorded server-side; the RecordStop webhook lands
+        // a few seconds after hangup, so refresh shortly afterwards to surface it.
+        if (result == CallResult.COMPLETED) {
+            scope.launch {
+                delay(RECORDING_REFRESH_DELAY_MS)
+                refreshRecordings()
+            }
+        }
     }
 
     private fun startInboundStatusPolling() {
@@ -454,6 +476,7 @@ class CallCoordinator(
     private companion object {
         val E164 = Regex("^\\+[1-9]\\d{7,14}$")
         const val INBOUND_STATUS_POLL_MS = 1_000L
+        const val RECORDING_REFRESH_DELAY_MS = 8_000L
         val DEFAULT_STUN_SERVERS = listOf(
             "stun:stun.l.google.com:19302",
             "stun:stun.cloudflare.com:3478",

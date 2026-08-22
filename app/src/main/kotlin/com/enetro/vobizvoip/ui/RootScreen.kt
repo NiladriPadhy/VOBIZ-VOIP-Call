@@ -37,6 +37,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,6 +54,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.enetro.vobizvoip.data.AppConfig
 import com.enetro.vobizvoip.data.CallLogEntry
+import com.enetro.vobizvoip.data.Recording
 import com.enetro.vobizvoip.domain.CallCoordinator
 import com.enetro.vobizvoip.domain.CallPhase
 import com.enetro.vobizvoip.domain.CallUiState
@@ -63,6 +65,7 @@ import com.google.firebase.messaging.FirebaseMessaging
 fun RootScreen(coordinator: CallCoordinator) {
     val state by coordinator.state.collectAsStateWithLifecycle()
     val callLog by coordinator.callLog.collectAsStateWithLifecycle()
+    val recordings by coordinator.recordings.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     var pendingAudioAction by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -131,9 +134,11 @@ fun RootScreen(coordinator: CallCoordinator) {
         else -> HomeScaffold(
             state = state,
             callLog = callLog,
+            recordings = recordings,
             onReconnect = coordinator::reconnect,
             onPlaceCall = { destination -> withAudioPermission { coordinator.placeCall(destination) } },
             onClearCallLog = coordinator::clearCallLog,
+            onRefreshRecordings = coordinator::refreshRecordings,
             onSaveConfig = onSaveConfig,
         )
     }
@@ -144,17 +149,38 @@ fun RootScreen(coordinator: CallCoordinator) {
 private fun HomeScaffold(
     state: CallUiState,
     callLog: List<CallLogEntry>,
+    recordings: List<Recording>,
     onReconnect: () -> Unit,
     onPlaceCall: (String) -> Unit,
     onClearCallLog: () -> Unit,
+    onRefreshRecordings: () -> Unit,
     onSaveConfig: (AppConfig) -> Unit,
 ) {
     StatusBarColor(MaterialTheme.colorScheme.background, darkIcons = !isSystemInDarkTheme())
 
+    val context = LocalContext.current
     var currentTab by rememberSaveable { mutableStateOf(HomeTab.KEYPAD) }
     var dialNumber by rememberSaveable { mutableStateOf("") }
     var showClearDialog by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
+    val recordingPlayer = remember(
+        state.config.backendUrl,
+        state.config.backendToken,
+        state.config.sipUsername,
+    ) {
+        RecordingPlayer(
+            context = context,
+            baseUrl = state.config.backendUrl,
+            authToken = state.config.backendToken,
+            endpoint = state.config.sipUsername,
+        )
+    }
+    DisposableEffect(recordingPlayer) {
+        onDispose { recordingPlayer.stop() }
+    }
+    LaunchedEffect(currentTab) {
+        if (currentTab == HomeTab.RECENTS) onRefreshRecordings() else recordingPlayer.stop()
+    }
 
     LaunchedEffect(state.error) {
         state.error?.let { snackbarHostState.showSnackbar(it) }
@@ -212,6 +238,8 @@ private fun HomeScaffold(
 
                 HomeTab.RECENTS -> CallLogScreen(
                     entries = callLog,
+                    recordings = recordings,
+                    player = recordingPlayer,
                     onDial = onPlaceCall,
                     onOpenInKeypad = { number ->
                         dialNumber = number

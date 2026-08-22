@@ -23,6 +23,9 @@ import androidx.compose.material.icons.automirrored.filled.CallMissed
 import androidx.compose.material.icons.automirrored.filled.CallReceived
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -38,11 +41,15 @@ import androidx.compose.ui.unit.dp
 import com.enetro.vobizvoip.data.CallDirection
 import com.enetro.vobizvoip.data.CallLogEntry
 import com.enetro.vobizvoip.data.CallResult
+import com.enetro.vobizvoip.data.Recording
 import com.enetro.vobizvoip.ui.theme.AnswerGreen
+import kotlin.math.abs
 
 @Composable
 fun CallLogScreen(
     entries: List<CallLogEntry>,
+    recordings: List<Recording>,
+    player: RecordingPlayer,
     onDial: (String) -> Unit,
     onOpenInKeypad: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -58,6 +65,8 @@ fun CallLogScreen(
         items(entries, key = { it.id }) { entry ->
             CallLogRow(
                 entry = entry,
+                recording = recordingForEntry(entry, recordings),
+                player = player,
                 onOpen = { onOpenInKeypad(entry.number) },
                 onDial = { onDial(entry.number) },
             )
@@ -68,6 +77,8 @@ fun CallLogScreen(
 @Composable
 private fun CallLogRow(
     entry: CallLogEntry,
+    recording: Recording?,
+    player: RecordingPlayer,
     onOpen: () -> Unit,
     onDial: () -> Unit,
 ) {
@@ -109,14 +120,44 @@ private fun CallLogRow(
                 )
             }
         }
-        if (entry.number.startsWith("+")) {
-            IconButton(onClick = onDial) {
-                Icon(
-                    imageVector = Icons.Filled.Call,
-                    contentDescription = "Call ${displayNumber(entry.number)}",
-                    tint = MaterialTheme.colorScheme.primary,
-                )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (recording != null) {
+                RecordingButton(recordingId = recording.id, player = player)
             }
+            if (entry.number.startsWith("+")) {
+                IconButton(onClick = onDial) {
+                    Icon(
+                        imageVector = Icons.Filled.Call,
+                        contentDescription = "Call ${displayNumber(entry.number)}",
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecordingButton(recordingId: String, player: RecordingPlayer) {
+    val preparing = player.preparingId == recordingId
+    val playing = player.playingId == recordingId
+    IconButton(onClick = { player.toggle(recordingId) }) {
+        when {
+            preparing -> CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            playing -> Icon(
+                imageVector = Icons.Filled.Stop,
+                contentDescription = "Stop recording",
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            else -> Icon(
+                imageVector = Icons.Filled.PlayArrow,
+                contentDescription = "Play recording",
+                tint = MaterialTheme.colorScheme.primary,
+            )
         }
     }
 }
@@ -191,4 +232,23 @@ private fun directionTint(entry: CallLogEntry) = when (entry.result) {
     } else {
         MaterialTheme.colorScheme.primary
     }
+}
+
+private const val RECORDING_MATCH_TOLERANCE_MS = 5 * 60_000L
+
+/**
+ * Recordings are produced server-side and can't carry the app's local call id,
+ * so match by direction + phone number (last 10 digits) and the closest start
+ * time within a tolerance window.
+ */
+private fun recordingForEntry(entry: CallLogEntry, recordings: List<Recording>): Recording? {
+    val entryDigits = entry.number.filter(Char::isDigit).takeLast(10)
+    if (entryDigits.isEmpty()) return null
+    return recordings
+        .filter {
+            it.direction == entry.direction &&
+                it.number.filter(Char::isDigit).takeLast(10) == entryDigits
+        }
+        .minByOrNull { abs(it.startedAtEpochMs - entry.startedAt) }
+        ?.takeIf { abs(it.startedAtEpochMs - entry.startedAt) <= RECORDING_MATCH_TOLERANCE_MS }
 }

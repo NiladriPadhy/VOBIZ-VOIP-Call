@@ -81,6 +81,29 @@ class BackendApi(private val client: OkHttpClient = OkHttpClient()) {
         )
     }
 
+    suspend fun fetchRecordings(config: AppConfig): List<Recording> {
+        val json = execute(config, "/recordings", null, "GET")
+        val array = json.optJSONArray("recordings") ?: return emptyList()
+        return buildList {
+            for (index in 0 until array.length()) {
+                val obj = array.getJSONObject(index)
+                add(
+                    Recording(
+                        id = obj.getString("id"),
+                        number = obj.optString("number"),
+                        direction = if (obj.optString("direction") == "incoming") {
+                            CallDirection.INCOMING
+                        } else {
+                            CallDirection.OUTGOING
+                        },
+                        startedAtEpochMs = obj.optLong("startedAtEpochMs"),
+                        durationSeconds = obj.optLong("durationSeconds"),
+                    ),
+                )
+            }
+        }
+    }
+
     private suspend fun execute(
         config: AppConfig,
         path: String,
