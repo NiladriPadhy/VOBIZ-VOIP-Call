@@ -161,6 +161,31 @@ fun RoundCallButton(
     }
 }
 
+/** Generic status pill (colored dot + label) matching [ConnectionChip]'s look. */
+@Composable
+fun StatusChip(label: String, dotColor: Color) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(dotColor),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 /** Compact registration status chip; tap to reconnect when offline. */
 @Composable
 fun ConnectionChip(state: RegistrationState, onReconnect: () -> Unit, prefix: String? = null) {

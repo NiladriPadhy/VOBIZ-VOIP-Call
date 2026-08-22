@@ -1,8 +1,6 @@
 package com.enetro.vobizvoip.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -13,7 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
@@ -21,6 +18,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,7 +34,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.enetro.vobizvoip.data.AppConfig
@@ -85,9 +82,11 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Spacer(Modifier.height(4.dp))
-        ConnectionCard(registration = registration, onReconnect = onReconnect)
-
-        BackendStatusCard(health = backendHealth, onRefresh = onCheckBackend)
+        SectionCard(title = "STATUS") {
+            SipStatusRow(registration = registration, onReconnect = onReconnect)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            BackendStatusRow(health = backendHealth, onRefresh = onCheckBackend)
+        }
 
         SectionCard(title = "SIP ENDPOINT") {
             SettingsField("SIP username", username) { username = it }
@@ -158,42 +157,52 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun ConnectionCard(registration: RegistrationState, onReconnect: () -> Unit) {
-    Card(
+private fun SipStatusRow(registration: RegistrationState, onReconnect: () -> Unit) {
+    Row(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = "SIP endpoint",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = when (registration) {
+                    RegistrationState.REGISTERED -> "Registered and ready for calls"
+                    RegistrationState.CONNECTING -> "Connecting to registrar…"
+                    RegistrationState.REGISTERING -> "Registering endpoint…"
+                    RegistrationState.DISCONNECTED -> "Disconnected"
+                    RegistrationState.FAILED -> "Registration failed"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        ConnectionChip(state = registration, onReconnect = onReconnect)
+        Spacer(Modifier.width(4.dp))
+        if (registration == RegistrationState.CONNECTING ||
+            registration == RegistrationState.REGISTERING
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = "SIP endpoint",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = when (registration) {
-                        RegistrationState.REGISTERED -> "Registered and ready for calls"
-                        RegistrationState.CONNECTING -> "Connecting to registrar…"
-                        RegistrationState.REGISTERING -> "Registering endpoint…"
-                        RegistrationState.DISCONNECTED -> "Disconnected"
-                        RegistrationState.FAILED -> "Registration failed"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            CircularProgressIndicator(
+                modifier = Modifier.size(22.dp),
+                strokeWidth = 2.dp,
+            )
+        } else {
+            IconButton(onClick = onReconnect) {
+                Icon(
+                    imageVector = Icons.Filled.Refresh,
+                    contentDescription = "Reconnect SIP",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            ConnectionChip(state = registration, onReconnect = onReconnect)
         }
     }
 }
 
 @Composable
-private fun BackendStatusCard(health: BackendHealth, onRefresh: () -> Unit) {
+private fun BackendStatusRow(health: BackendHealth, onRefresh: () -> Unit) {
     val (label, dotColor) = when (health.state) {
         BackendHealthState.ONLINE -> "Online" to AnswerGreen
         BackendHealthState.OFFLINE -> "Offline" to DeclineRed
@@ -210,58 +219,36 @@ private fun BackendStatusCard(health: BackendHealth, onRefresh: () -> Unit) {
         BackendHealthState.CHECKING -> "Contacting backend…"
         BackendHealthState.UNKNOWN -> "Tap refresh to check the backend"
     }
-    Card(
+    Row(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = "Backend",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = "Backend",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        StatusChip(label = label, dotColor = dotColor)
+        Spacer(Modifier.width(4.dp))
+        if (health.state == BackendHealthState.CHECKING) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(22.dp),
+                strokeWidth = 2.dp,
+            )
+        } else {
+            IconButton(onClick = onRefresh) {
+                Icon(
+                    imageVector = Icons.Filled.Refresh,
+                    contentDescription = "Check backend",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(dotColor),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = label,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = detail,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            if (health.state == BackendHealthState.CHECKING) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(22.dp),
-                    strokeWidth = 2.dp,
-                )
-            } else {
-                IconButton(onClick = onRefresh) {
-                    Icon(
-                        imageVector = Icons.Filled.Refresh,
-                        contentDescription = "Check backend",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
             }
         }
     }
