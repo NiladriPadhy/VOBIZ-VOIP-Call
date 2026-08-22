@@ -55,6 +55,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.enetro.vobizvoip.data.AppConfig
 import com.enetro.vobizvoip.data.CallLogEntry
 import com.enetro.vobizvoip.data.Recording
+import com.enetro.vobizvoip.domain.BackendHealth
 import com.enetro.vobizvoip.domain.CallCoordinator
 import com.enetro.vobizvoip.domain.CallPhase
 import com.enetro.vobizvoip.domain.CallUiState
@@ -110,7 +111,9 @@ fun RootScreen(coordinator: CallCoordinator) {
     when {
         !state.config.isComplete -> OnboardingScreen(
             config = state.config,
+            backendHealth = state.backendHealth,
             onReconnect = coordinator::reconnect,
+            onCheckBackend = coordinator::checkBackendHealth,
             onSave = onSaveConfig,
         )
 
@@ -147,6 +150,7 @@ fun RootScreen(coordinator: CallCoordinator) {
             callLog = callLog,
             recordings = recordings,
             onReconnect = coordinator::reconnect,
+            onCheckBackend = coordinator::checkBackendHealth,
             onPlaceCall = { destination -> withAudioPermission { coordinator.placeCall(destination) } },
             onClearCallLog = coordinator::clearCallLog,
             onRefreshRecordings = coordinator::refreshRecordings,
@@ -162,6 +166,7 @@ private fun HomeScaffold(
     callLog: List<CallLogEntry>,
     recordings: List<Recording>,
     onReconnect: () -> Unit,
+    onCheckBackend: () -> Unit,
     onPlaceCall: (String) -> Unit,
     onClearCallLog: () -> Unit,
     onRefreshRecordings: () -> Unit,
@@ -204,7 +209,7 @@ private fun HomeScaffold(
             TopAppBar(
                 title = { BrandTitle() },
                 actions = {
-                    ConnectionChip(state.registration, onReconnect)
+                    ConnectionChip(state.registration, onReconnect, prefix = "SIP")
                     if (currentTab == HomeTab.RECENTS && callLog.isNotEmpty()) {
                         IconButton(onClick = { showClearDialog = true }) {
                             Icon(
@@ -261,7 +266,9 @@ private fun HomeScaffold(
                 HomeTab.SETTINGS -> SettingsScreen(
                     initial = state.config,
                     registration = state.registration,
+                    backendHealth = state.backendHealth,
                     onReconnect = onReconnect,
+                    onCheckBackend = onCheckBackend,
                     onSave = onSaveConfig,
                 )
             }
@@ -291,7 +298,9 @@ private fun HomeScaffold(
 @Composable
 private fun OnboardingScreen(
     config: AppConfig,
+    backendHealth: BackendHealth,
     onReconnect: () -> Unit,
+    onCheckBackend: () -> Unit,
     onSave: (AppConfig) -> Unit,
 ) {
     StatusBarColor(MaterialTheme.colorScheme.background, darkIcons = !isSystemInDarkTheme())
@@ -320,7 +329,9 @@ private fun OnboardingScreen(
         SettingsScreen(
             initial = config,
             registration = RegistrationState.DISCONNECTED,
+            backendHealth = backendHealth,
             onReconnect = onReconnect,
+            onCheckBackend = onCheckBackend,
             onSave = onSave,
             modifier = Modifier.weight(1f),
         )

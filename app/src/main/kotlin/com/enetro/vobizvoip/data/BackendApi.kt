@@ -28,6 +28,11 @@ data class InboundCallStatus(
     val active: Boolean,
 )
 
+data class HealthReport(
+    val firebaseReady: Boolean,
+    val pendingCalls: Int,
+)
+
 class BackendApi(private val client: OkHttpClient = OkHttpClient()) {
     suspend fun prepareOutbound(config: AppConfig, destination: String) {
         execute(
@@ -82,6 +87,14 @@ class BackendApi(private val client: OkHttpClient = OkHttpClient()) {
 
     suspend fun declinePending(config: AppConfig, pendingCallId: String) {
         execute(config, "/calls/$pendingCallId/decline", JSONObject())
+    }
+
+    suspend fun checkHealth(config: AppConfig): HealthReport {
+        val json = execute(config, "/health", null, "GET")
+        return HealthReport(
+            firebaseReady = json.optBoolean("firebase"),
+            pendingCalls = json.optInt("pendingCalls"),
+        )
     }
 
     suspend fun inboundCallStatus(config: AppConfig): InboundCallStatus {

@@ -107,8 +107,7 @@ Open the app and enter:
 - SIP domain `registrar.vobiz.ai`;
 - tunnel HTTPS URL;
 - the same `DEVICE_TOKEN` as the backend;
-- Vobiz caller ID in E.164 format;
-- TURN URL and credentials when supplied.
+- Vobiz caller ID in E.164 format.
 
 Credentials are encrypted at rest with an Android Keystore AES-GCM key.
 

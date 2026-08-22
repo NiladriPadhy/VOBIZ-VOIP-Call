@@ -20,10 +20,12 @@ import com.enetro.vobizvoip.signaling.RegistrationState
 import com.enetro.vobizvoip.signaling.SipClient
 import com.enetro.vobizvoip.signaling.SipEvent
 import com.enetro.vobizvoip.signaling.SipMessage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -45,6 +47,16 @@ enum class CallPhase {
     FAILED,
 }
 
+enum class BackendHealthState { UNKNOWN, CHECKING, ONLINE, OFFLINE }
+
+data class BackendHealth(
+    val state: BackendHealthState = BackendHealthState.UNKNOWN,
+    val firebaseReady: Boolean = false,
+    val pendingCalls: Int = 0,
+    val detail: String? = null,
+    val checkedAtMillis: Long? = null,
+)
+
 data class CallUiState(
     val config: AppConfig = AppConfig(),
     val registration: RegistrationState = RegistrationState.DISCONNECTED,
@@ -55,6 +67,7 @@ data class CallUiState(
     val error: String? = null,
     val pendingCallId: String? = null,
     val connectedAtMillis: Long? = null,
+    val backendHealth: BackendHealth = BackendHealth(),
 )
 
 private data class ActiveCallRecord(
@@ -156,6 +169,61 @@ class CallCoordinator(
         }
     }
 
+    fun checkBackendHealth() {
+        val config = _state.value.config
+        if (!config.backendUrl.trim().startsWith("http")) {
+            _state.update {
+                it.copy(
+                    backendHealth = BackendHealth(
+                        state = BackendHealthState.OFFLINE,
+                        detail = "Set a backend URL in settings",
+                        checkedAtMillis = System.currentTimeMillis(),
+                    ),
+                )
+            }
+            return
+        }
+        _state.update {
+            it.copy(backendHealth = it.backendHealth.copy(state = BackendHealthState.CHECKING))
+        }
+        scope.launch {
+            val health = try {
+                val report = withTimeout(BACKEND_HEALTH_TIMEOUT_MS) { backendApi.checkHealth(config) }
+                BackendHealth(
+                    state = BackendHealthState.ONLINE,
+                    firebaseReady = report.firebaseReady,
+                    pendingCalls = report.pendingCalls,
+                    checkedAtMillis = System.currentTimeMillis(),
+                )
+            } catch (timeout: TimeoutCancellationException) {
+                BackendHealth(
+                    state = BackendHealthState.OFFLINE,
+                    detail = "No response from backend (timed out)",
+                    checkedAtMillis = System.currentTimeMillis(),
+                )
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (error: Throwable) {
+                Log.w("VobizCall", "Backend health check failed: ${error.message}")
+                BackendHealth(
+                    state = BackendHealthState.OFFLINE,
+                    detail = healthErrorMessage(error),
+                    checkedAtMillis = System.currentTimeMillis(),
+                )
+            }
+            _state.update { it.copy(backendHealth = health) }
+        }
+    }
+
+    private fun healthErrorMessage(error: Throwable): String {
+        val message = error.message
+        return if (!message.isNullOrBlank() && message.contains("HTTP")) {
+            message
+        } else {
+            "Backend unreachable — check the tunnel and server"
+        }
+    }
+
     fun placeCall(destination: String) {
         val normalized = destination.trim().replace(" ", "")
         if (!E164.matches(normalized)) {
@@ -176,7 +244,7 @@ class CallCoordinator(
         _state.update { it.copy(phase = CallPhase.CONNECTING, error = null) }
         scope.launch {
             runCatching {
-                val answer = webRtc.answerOffer(invite.body, iceServers(_state.value.config))
+                val answer = webRtc.answerOffer(invite.body, iceServers())
                 sipClient.acceptIncoming(answer)
                 // The answering side is connected once the 200 OK is sent. Some
                 // WSS/PSTN paths never deliver the in-dialog ACK back to the app,
@@ -294,7 +362,7 @@ class CallCoordinator(
                 if (prepareBackend) {
                     backendApi.prepareOutbound(_state.value.config, destination)
                 }
-                val offer = webRtc.createOffer(iceServers(_state.value.config))
+                val offer = webRtc.createOffer(iceServers())
                 sipClient.invite(destination, offer)
             }.onFailure { fail(it.message ?: "Unable to start call") }
         }
@@ -470,24 +538,16 @@ class CallCoordinator(
         incomingRingtone = null
     }
 
-    private fun iceServers(config: AppConfig): List<PeerConnection.IceServer> = buildList {
-        DEFAULT_STUN_SERVERS.forEach { url ->
-            add(PeerConnection.IceServer.builder(url).createIceServer())
+    private fun iceServers(): List<PeerConnection.IceServer> =
+        DEFAULT_STUN_SERVERS.map { url ->
+            PeerConnection.IceServer.builder(url).createIceServer()
         }
-        if (config.turnUrl.isNotBlank()) {
-            add(
-                PeerConnection.IceServer.builder(config.turnUrl)
-                    .setUsername(config.turnUsername)
-                    .setPassword(config.turnPassword)
-                    .createIceServer(),
-            )
-        }
-    }
 
     private companion object {
         val E164 = Regex("^\\+[1-9]\\d{7,14}$")
         const val INBOUND_STATUS_POLL_MS = 1_000L
         const val RECORDING_REFRESH_DELAY_MS = 8_000L
+        const val BACKEND_HEALTH_TIMEOUT_MS = 6_000L
         val DEFAULT_STUN_SERVERS = listOf(
             "stun:stun.l.google.com:19302",
             "stun:stun.cloudflare.com:3478",

@@ -163,8 +163,8 @@ fun RoundCallButton(
 
 /** Compact registration status chip; tap to reconnect when offline. */
 @Composable
-fun ConnectionChip(state: RegistrationState, onReconnect: () -> Unit) {
-    val (label, dotColor) = when (state) {
+fun ConnectionChip(state: RegistrationState, onReconnect: () -> Unit, prefix: String? = null) {
+    val (statusLabel, dotColor) = when (state) {
         RegistrationState.REGISTERED -> "Connected" to AnswerGreen
         RegistrationState.CONNECTING -> "Connecting" to WarningAmber
         RegistrationState.REGISTERING -> "Registering" to WarningAmber
@@ -189,7 +189,7 @@ fun ConnectionChip(state: RegistrationState, onReconnect: () -> Unit) {
         )
         Spacer(Modifier.width(6.dp))
         Text(
-            text = label,
+            text = if (prefix != null) "$prefix · $statusLabel" else statusLabel,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

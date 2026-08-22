@@ -1,6 +1,8 @@
 package com.enetro.vobizvoip.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -8,34 +10,50 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.enetro.vobizvoip.data.AppConfig
+import com.enetro.vobizvoip.domain.BackendHealth
+import com.enetro.vobizvoip.domain.BackendHealthState
 import com.enetro.vobizvoip.signaling.RegistrationState
+import com.enetro.vobizvoip.ui.theme.AnswerGreen
+import com.enetro.vobizvoip.ui.theme.DeclineRed
+import com.enetro.vobizvoip.ui.theme.WarningAmber
 
 @Composable
 fun SettingsScreen(
     initial: AppConfig,
     registration: RegistrationState,
+    backendHealth: BackendHealth,
     onReconnect: () -> Unit,
+    onCheckBackend: () -> Unit,
     onSave: (AppConfig) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -46,9 +64,6 @@ fun SettingsScreen(
     var backend by rememberSaveable(initial) { mutableStateOf(initial.backendUrl) }
     var backendToken by rememberSaveable(initial) { mutableStateOf(initial.backendToken) }
     var callerId by rememberSaveable(initial) { mutableStateOf(initial.callerId) }
-    var turnUrl by rememberSaveable(initial) { mutableStateOf(initial.turnUrl) }
-    var turnUsername by rememberSaveable(initial) { mutableStateOf(initial.turnUsername) }
-    var turnPassword by rememberSaveable(initial) { mutableStateOf(initial.turnPassword) }
     var recordingEnabled by rememberSaveable(initial) { mutableStateOf(initial.recordingEnabled) }
 
     val isValid = username.isNotBlank() &&
@@ -57,6 +72,10 @@ fun SettingsScreen(
         backend.startsWith("https://") &&
         backendToken.isNotBlank() &&
         callerId.startsWith("+")
+
+    LaunchedEffect(initial.backendUrl) {
+        if (initial.backendUrl.startsWith("http")) onCheckBackend()
+    }
 
     Column(
         modifier = modifier
@@ -67,6 +86,8 @@ fun SettingsScreen(
     ) {
         Spacer(Modifier.height(4.dp))
         ConnectionCard(registration = registration, onReconnect = onReconnect)
+
+        BackendStatusCard(health = backendHealth, onRefresh = onCheckBackend)
 
         SectionCard(title = "SIP ENDPOINT") {
             SettingsField("SIP username", username) { username = it }
@@ -103,12 +124,6 @@ fun SettingsScreen(
             }
         }
 
-        SectionCard(title = "TURN RELAY (RECOMMENDED)") {
-            SettingsField("TURN URL", turnUrl) { turnUrl = it }
-            SettingsField("TURN username", turnUsername) { turnUsername = it }
-            SettingsSecretField("TURN password", turnPassword) { turnPassword = it }
-        }
-
         Text(
             text = "Credentials are encrypted with the Android Keystore and never leave this device.",
             style = MaterialTheme.typography.bodySmall,
@@ -127,9 +142,6 @@ fun SettingsScreen(
                         backendUrl = backend,
                         backendToken = backendToken,
                         callerId = callerId,
-                        turnUrl = turnUrl,
-                        turnUsername = turnUsername,
-                        turnPassword = turnPassword,
                         recordingEnabled = recordingEnabled,
                     ),
                 )
@@ -159,7 +171,7 @@ private fun ConnectionCard(registration: RegistrationState, onReconnect: () -> U
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    text = "Connection",
+                    text = "SIP endpoint",
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
@@ -176,6 +188,81 @@ private fun ConnectionCard(registration: RegistrationState, onReconnect: () -> U
                 )
             }
             ConnectionChip(state = registration, onReconnect = onReconnect)
+        }
+    }
+}
+
+@Composable
+private fun BackendStatusCard(health: BackendHealth, onRefresh: () -> Unit) {
+    val (label, dotColor) = when (health.state) {
+        BackendHealthState.ONLINE -> "Online" to AnswerGreen
+        BackendHealthState.OFFLINE -> "Offline" to DeclineRed
+        BackendHealthState.CHECKING -> "Checking…" to WarningAmber
+        BackendHealthState.UNKNOWN -> "Unknown" to MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val detail = when (health.state) {
+        BackendHealthState.ONLINE -> {
+            val firebase = if (health.firebaseReady) "Firebase ready" else "Firebase off"
+            "$firebase · ${health.pendingCalls} pending"
+        }
+        BackendHealthState.OFFLINE -> health.detail?.takeIf { it.isNotBlank() }
+            ?: "Backend unreachable"
+        BackendHealthState.CHECKING -> "Contacting backend…"
+        BackendHealthState.UNKNOWN -> "Tap refresh to check the backend"
+    }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = "Backend",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(dotColor),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            if (health.state == BackendHealthState.CHECKING) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(22.dp),
+                    strokeWidth = 2.dp,
+                )
+            } else {
+                IconButton(onClick = onRefresh) {
+                    Icon(
+                        imageVector = Icons.Filled.Refresh,
+                        contentDescription = "Check backend",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
     }
 }

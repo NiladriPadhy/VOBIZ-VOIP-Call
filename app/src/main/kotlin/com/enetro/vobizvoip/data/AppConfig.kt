@@ -20,9 +20,6 @@ data class AppConfig(
     val backendUrl: String = "",
     val backendToken: String = "",
     val callerId: String = "",
-    val turnUrl: String = "",
-    val turnUsername: String = "",
-    val turnPassword: String = "",
     val recordingEnabled: Boolean = true,
 ) {
     val isComplete: Boolean
@@ -60,9 +57,6 @@ class SecureConfigStore(context: Context) {
                 backendUrl = json.optString("backendUrl"),
                 backendToken = json.optString("backendToken"),
                 callerId = json.optString("callerId"),
-                turnUrl = json.optString("turnUrl"),
-                turnUsername = json.optString("turnUsername"),
-                turnPassword = json.optString("turnPassword"),
                 recordingEnabled = json.optBoolean("recordingEnabled", true),
             )
         }.getOrElse { AppConfig() }
@@ -77,9 +71,6 @@ class SecureConfigStore(context: Context) {
             .put("backendUrl", config.backendUrl.removeSuffix("/"))
             .put("backendToken", config.backendToken)
             .put("callerId", config.callerId)
-            .put("turnUrl", config.turnUrl)
-            .put("turnUsername", config.turnUsername)
-            .put("turnPassword", config.turnPassword)
             .put("recordingEnabled", config.recordingEnabled)
             .toString()
         val cipher = Cipher.getInstance(TRANSFORMATION)
