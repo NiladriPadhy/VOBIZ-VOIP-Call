@@ -20,8 +20,9 @@
     <application
         android:name=".VobizApplication"
         android:allowBackup="false"
-        android:icon="@android:drawable/sym_action_call"
+        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.VobizVoip"
         android:usesCleartextTraffic="false">

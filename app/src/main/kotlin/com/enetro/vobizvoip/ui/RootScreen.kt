@@ -1,8 +1,11 @@
 package com.enetro.vobizvoip.ui
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -94,8 +97,12 @@ fun RootScreen(coordinator: CallCoordinator) {
 
     val onSaveConfig: (AppConfig) -> Unit = { config ->
         coordinator.saveConfig(config)
-        permissionLauncher.launch(requiredPermissions())
+        requestMissingPermissions(context, permissionLauncher)
         registerForPush(coordinator)
+    }
+
+    LaunchedEffect(Unit) {
+        requestMissingPermissions(context, permissionLauncher)
     }
 
     // Re-assert this device's FCM installation ID on every launch once the
@@ -378,11 +385,25 @@ private val ACTIVE_PHASES = setOf(
     CallPhase.ENDING,
 )
 
-private fun requiredPermissions(): Array<String> = arrayOf(
-    Manifest.permission.RECORD_AUDIO,
-    Manifest.permission.BLUETOOTH_CONNECT,
-    Manifest.permission.POST_NOTIFICATIONS,
-)
+private fun requiredPermissions(): Array<String> = buildList {
+    add(Manifest.permission.RECORD_AUDIO)
+    add(Manifest.permission.BLUETOOTH_CONNECT)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        add(Manifest.permission.POST_NOTIFICATIONS)
+    }
+}.toTypedArray()
+
+private fun requestMissingPermissions(
+    context: Context,
+    launcher: ActivityResultLauncher<Array<String>>,
+) {
+    val missing = requiredPermissions().filter { permission ->
+        ContextCompat.checkSelfPermission(context, permission) != PackageManager.PERMISSION_GRANTED
+    }
+    if (missing.isNotEmpty()) {
+        launcher.launch(missing.toTypedArray())
+    }
+}
 
 // Ensure FCM is registered and report the current Firebase Installation ID
 // (the target the backend pushes inbound-call wake-ups to) to the backend.

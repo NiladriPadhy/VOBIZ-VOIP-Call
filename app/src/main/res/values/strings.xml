@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Enetro VoIP POC</string>
+    <string name="app_name">Enetro VoIP</string>
     <string name="incoming_call_channel">Incoming calls</string>
     <string name="active_call_channel">Active calls</string>
 </resources>
