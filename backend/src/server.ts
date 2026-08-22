@@ -117,6 +117,8 @@ app.post(
   async (request, response) => {
     const from = field(request, "From", "from");
     const to = field(request, "To", "to");
+    const sipHeaderTo = field(request, "SIP-H-To");
+    const direction = field(request, "Direction", "direction").toLowerCase();
     const routeType = field(request, "RouteType", "route_type").toLowerCase();
     const callUuid = field(
       request,
@@ -125,11 +127,27 @@ app.post(
       "RequestUUID",
       "request_uuid",
     );
-    const isSipLeg = from.toLowerCase().startsWith("sip:") || routeType === "sip";
-    // PSTN inbound: Vobiz only POSTs attached numbers to this Voice App, so
-    // any non-SIP From is a call to whatever DID is in To. SIP From is outbound.
+    // Always log the raw shape of every Answer callback so inbound routing
+    // problems are visible even when a leg is dropped before either branch.
+    logger.info(
+      {
+        from: redactIdentity(from),
+        to: redactIdentity(to || sipHeaderTo),
+        direction: direction || "none",
+        routeType: routeType || "none",
+        callUuid: callUuid || "none",
+      },
+      "Answer webhook received",
+    );
+    // Only the app's own legs (an outbound dial, or the leg that joins an
+    // inbound conference) originate from our SIP endpoint user. Everything else
+    // Vobiz sends to this Voice App is a real inbound PSTN caller. Do NOT key
+    // off RouteType: Vobiz reports RouteType="sip" for the app's SIP leg and can
+    // also report it for SIP-trunked inbound, which would misclassify a real
+    // caller as outbound and drop the call.
+    const isSipLeg = sipUser(from) === sipEndpointUser;
     if (!isSipLeg) {
-      const did = normalizeNumber(to);
+      const did = normalizeNumber(to) ?? normalizeNumber(sipHeaderTo);
       const caller = normalizeNumber(from) ?? sanitizeCaller(from);
       if (!did) {
         sendXml(

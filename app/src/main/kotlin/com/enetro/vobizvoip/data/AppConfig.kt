@@ -36,8 +36,8 @@ class SecureConfigStore(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 
     fun load(): AppConfig {
-        val encrypted = preferences.getString(KEY_PAYLOAD, null) ?: return AppConfig()
-        val iv = preferences.getString(KEY_IV, null) ?: return AppConfig()
+        val encrypted = preferences.getString(KEY_PAYLOAD, null) ?: return defaultConfig()
+        val iv = preferences.getString(KEY_IV, null) ?: return defaultConfig()
         return runCatching {
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(
@@ -59,8 +59,24 @@ class SecureConfigStore(context: Context) {
                 callerId = json.optString("callerId"),
                 recordingEnabled = json.optBoolean("recordingEnabled", true),
             )
-        }.getOrElse { AppConfig() }
+        }.getOrElse { defaultConfig() }
     }
+
+    // Fresh-install fallback. In debug builds this pre-fills the POC test
+    // credentials so the app connects without manual setup; release builds get a
+    // blank config (the debug fields are empty outside the debug build type).
+    private fun defaultConfig(): AppConfig =
+        if (BuildConfig.DEBUG) {
+            AppConfig(
+                sipUsername = BuildConfig.DEBUG_SIP_USERNAME,
+                sipPassword = BuildConfig.DEBUG_SIP_PASSWORD,
+                backendUrl = BuildConfig.DEBUG_BACKEND_URL,
+                backendToken = BuildConfig.DEBUG_BACKEND_TOKEN,
+                callerId = BuildConfig.DEBUG_CALLER_ID,
+            )
+        } else {
+            AppConfig()
+        }
 
     fun save(config: AppConfig) {
         val json = JSONObject()

@@ -25,9 +25,30 @@ android {
         vectorDrawables.useSupportLibrary = true
         buildConfigField("String", "DEFAULT_REGISTRAR_URL", "\"wss://registrar.vobiz.ai:5063/\"")
         buildConfigField("String", "DEFAULT_SIP_DOMAIN", "\"registrar.vobiz.ai\"")
+
+        // Convenience defaults pre-filled into a fresh install. Kept empty here so
+        // release builds ship no credentials; the debug build type overrides them.
+        buildConfigField("String", "DEBUG_SIP_USERNAME", "\"\"")
+        buildConfigField("String", "DEBUG_SIP_PASSWORD", "\"\"")
+        buildConfigField("String", "DEBUG_BACKEND_URL", "\"\"")
+        buildConfigField("String", "DEBUG_BACKEND_TOKEN", "\"\"")
+        buildConfigField("String", "DEBUG_CALLER_ID", "\"\"")
     }
 
     buildTypes {
+        debug {
+            // Debug-only fresh-install defaults so the POC can be tested without
+            // retyping config. Never included in release builds.
+            buildConfigField("String", "DEBUG_SIP_USERNAME", "\"npadhy94954314076727638\"")
+            buildConfigField("String", "DEBUG_SIP_PASSWORD", "\"papu1234\"")
+            buildConfigField("String", "DEBUG_BACKEND_URL", "\"https://bff6-122-176-249-201.ngrok-free.app\"")
+            buildConfigField(
+                "String",
+                "DEBUG_BACKEND_TOKEN",
+                "\"5ae9d5b882875c15ec3c805f55ff08e4bbe21fb28549cb2470385b62f22896ea\"",
+            )
+            buildConfigField("String", "DEBUG_CALLER_ID", "\"+918071581219\"")
+        }
         release {
             isMinifyEnabled = true
             proguardFiles(
