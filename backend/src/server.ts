@@ -64,6 +64,7 @@ type DirectInboundState = {
 type OutboundIntent = {
   destination: string;
   callerId: string;
+  record: boolean;
 };
 
 type RecordingMeta = {
@@ -84,6 +85,7 @@ const pendingCalls = new Map<string, PendingCall>();
 const pendingJoinByEndpoint = new Map<string, string>();
 const outboundByEndpoint = new Map<string, OutboundIntent>();
 const directInboundByEndpoint = new Map<string, DirectInboundState>();
+const recordByEndpoint = new Map<string, boolean>();
 const sipEndpointUser = env.SIP_ENDPOINT.substring(4).split("@")[0]!;
 const webhookBaseUrl =
   `${env.PUBLIC_URL.replace(/\/$/, "")}/webhooks/vobiz/${env.WEBHOOK_TOKEN}`;
@@ -151,13 +153,16 @@ app.post(
           active: true,
         });
       }
+      const inboundRecord = recordByEndpoint.get(sipEndpointUser) ?? true;
       sendXml(
         response,
         dialUserXml(
           env.SIP_ENDPOINT,
           caller,
           did,
-          recordVerb("incoming", normalizeNumber(from) ?? caller, sipEndpointUser),
+          inboundRecord
+            ? recordVerb("incoming", normalizeNumber(from) ?? caller, sipEndpointUser)
+            : "",
         ),
       );
       return;
@@ -210,9 +215,14 @@ app.post(
       );
       return;
     }
+    const outboundRecord = outbound?.record ?? recordByEndpoint.get(endpoint) ?? true;
     sendXml(
       response,
-      dialNumberXml(destination, callerId, recordVerb("outgoing", destination, endpoint)),
+      dialNumberXml(
+        destination,
+        callerId,
+        outboundRecord ? recordVerb("outgoing", destination, endpoint) : "",
+      ),
     );
   },
 );
@@ -331,12 +341,28 @@ app.post("/devices/register", (request, response) => {
   response.sendStatus(204);
 });
 
+app.post("/devices/recording", (request, response) => {
+  const input = z
+    .object({
+      endpoint: z.string().min(1).max(128),
+      enabled: z.boolean(),
+    })
+    .parse(request.body);
+  recordByEndpoint.set(input.endpoint, input.enabled);
+  logger.info(
+    { endpoint: input.endpoint, enabled: input.enabled },
+    "Call recording preference updated",
+  );
+  response.sendStatus(204);
+});
+
 app.post("/calls/outbound", (request, response) => {
   const input = z
     .object({
       endpoint: z.string().min(1).max(128),
       destination: z.string(),
       callerId: e164,
+      record: z.boolean().optional(),
     })
     .parse(request.body);
   const destination = normalizeNumber(input.destination);
@@ -344,10 +370,13 @@ app.post("/calls/outbound", (request, response) => {
     response.status(400).json({ error: "Invalid destination" });
     return;
   }
+  const record = input.record ?? true;
   callerIdByEndpoint.set(input.endpoint, input.callerId);
+  recordByEndpoint.set(input.endpoint, record);
   outboundByEndpoint.set(input.endpoint, {
     destination,
     callerId: input.callerId,
+    record,
   });
   setTimeout(() => {
     const current = outboundByEndpoint.get(input.endpoint);

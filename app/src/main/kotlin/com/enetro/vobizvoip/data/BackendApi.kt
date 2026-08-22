@@ -36,7 +36,18 @@ class BackendApi(private val client: OkHttpClient = OkHttpClient()) {
             JSONObject()
                 .put("endpoint", config.sipUsername)
                 .put("destination", destination)
-                .put("callerId", config.callerId),
+                .put("callerId", config.callerId)
+                .put("record", config.recordingEnabled),
+        )
+    }
+
+    suspend fun setRecordingPreference(config: AppConfig) {
+        execute(
+            config,
+            "/devices/recording",
+            JSONObject()
+                .put("endpoint", config.sipUsername)
+                .put("enabled", config.recordingEnabled),
         )
     }
 

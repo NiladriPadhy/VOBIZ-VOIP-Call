@@ -23,6 +23,7 @@ data class AppConfig(
     val turnUrl: String = "",
     val turnUsername: String = "",
     val turnPassword: String = "",
+    val recordingEnabled: Boolean = true,
 ) {
     val isComplete: Boolean
         get() = sipUsername.isNotBlank() &&
@@ -62,6 +63,7 @@ class SecureConfigStore(context: Context) {
                 turnUrl = json.optString("turnUrl"),
                 turnUsername = json.optString("turnUsername"),
                 turnPassword = json.optString("turnPassword"),
+                recordingEnabled = json.optBoolean("recordingEnabled", true),
             )
         }.getOrElse { AppConfig() }
     }
@@ -78,6 +80,7 @@ class SecureConfigStore(context: Context) {
             .put("turnUrl", config.turnUrl)
             .put("turnUsername", config.turnUsername)
             .put("turnPassword", config.turnPassword)
+            .put("recordingEnabled", config.recordingEnabled)
             .toString()
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())

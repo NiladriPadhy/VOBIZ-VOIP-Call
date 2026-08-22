@@ -96,6 +96,15 @@ class CallCoordinator(
         }
     }
 
+    private fun pushRecordingPreference() {
+        val config = _state.value.config
+        if (!config.isComplete) return
+        scope.launch {
+            runCatching { backendApi.setRecordingPreference(config) }
+                .onFailure { Log.w("VobizCall", "Recording preference push failed: ${it.message}") }
+        }
+    }
+
     init {
         scope.launch {
             sipClient.registrationState.collect { registration ->
@@ -121,6 +130,7 @@ class CallCoordinator(
         if (_state.value.config.isComplete) {
             sipClient.connect(_state.value.config)
             refreshRecordings()
+            pushRecordingPreference()
         }
     }
 
@@ -135,6 +145,7 @@ class CallCoordinator(
         configStore.save(normalized)
         _state.update { it.copy(config = normalized, phase = CallPhase.IDLE, error = null) }
         sipClient.connect(normalized)
+        pushRecordingPreference()
     }
 
     fun reconnect() {

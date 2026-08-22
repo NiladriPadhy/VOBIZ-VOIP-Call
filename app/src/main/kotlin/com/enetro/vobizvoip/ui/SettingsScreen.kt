@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -15,6 +16,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,6 +49,7 @@ fun SettingsScreen(
     var turnUrl by rememberSaveable(initial) { mutableStateOf(initial.turnUrl) }
     var turnUsername by rememberSaveable(initial) { mutableStateOf(initial.turnUsername) }
     var turnPassword by rememberSaveable(initial) { mutableStateOf(initial.turnPassword) }
+    var recordingEnabled by rememberSaveable(initial) { mutableStateOf(initial.recordingEnabled) }
 
     val isValid = username.isNotBlank() &&
         password.isNotBlank() &&
@@ -78,6 +81,28 @@ fun SettingsScreen(
             SettingsField("Vobiz caller ID (E.164)", callerId) { callerId = it }
         }
 
+        SectionCard(title = "CALL RECORDING") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = "Record calls",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = "Record each connected call and play it back from Recents.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Switch(
+                    checked = recordingEnabled,
+                    onCheckedChange = { recordingEnabled = it },
+                )
+            }
+        }
+
         SectionCard(title = "TURN RELAY (RECOMMENDED)") {
             SettingsField("TURN URL", turnUrl) { turnUrl = it }
             SettingsField("TURN username", turnUsername) { turnUsername = it }
@@ -105,6 +130,7 @@ fun SettingsScreen(
                         turnUrl = turnUrl,
                         turnUsername = turnUsername,
                         turnPassword = turnPassword,
+                        recordingEnabled = recordingEnabled,
                     ),
                 )
             },
