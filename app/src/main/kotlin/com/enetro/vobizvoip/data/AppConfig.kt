@@ -21,6 +21,9 @@ data class AppConfig(
     val backendToken: String = "",
     val callerId: String = "",
     val recordingEnabled: Boolean = true,
+    // ISO 3166-1 alpha-2 region used to normalize dialed numbers when the device
+    // has no SIM (e.g. "IN"). Blank means "let the SIM decide, else fall back".
+    val defaultCountryIso: String = "",
 ) {
     val isComplete: Boolean
         get() = sipUsername.isNotBlank() &&
@@ -58,6 +61,7 @@ class SecureConfigStore(context: Context) {
                 backendToken = json.optString("backendToken"),
                 callerId = json.optString("callerId"),
                 recordingEnabled = json.optBoolean("recordingEnabled", true),
+                defaultCountryIso = json.optString("defaultCountryIso"),
             )
         }.getOrElse { defaultConfig() }
     }
@@ -88,6 +92,7 @@ class SecureConfigStore(context: Context) {
             .put("backendToken", config.backendToken)
             .put("callerId", config.callerId)
             .put("recordingEnabled", config.recordingEnabled)
+            .put("defaultCountryIso", config.defaultCountryIso)
             .toString()
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())

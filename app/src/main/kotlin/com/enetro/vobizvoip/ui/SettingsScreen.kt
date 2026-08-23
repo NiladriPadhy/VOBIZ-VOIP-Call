@@ -1,6 +1,8 @@
 package com.enetro.vobizvoip.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -13,11 +15,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -30,6 +35,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -37,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.enetro.vobizvoip.data.AppConfig
+import com.enetro.vobizvoip.data.CountryCodes
 import com.enetro.vobizvoip.domain.BackendHealth
 import com.enetro.vobizvoip.domain.BackendHealthState
 import com.enetro.vobizvoip.signaling.RegistrationState
@@ -62,6 +69,7 @@ fun SettingsScreen(
     var backendToken by rememberSaveable(initial) { mutableStateOf(initial.backendToken) }
     var callerId by rememberSaveable(initial) { mutableStateOf(initial.callerId) }
     var recordingEnabled by rememberSaveable(initial) { mutableStateOf(initial.recordingEnabled) }
+    var countryIso by rememberSaveable(initial) { mutableStateOf(initial.defaultCountryIso) }
 
     val isValid = username.isNotBlank() &&
         password.isNotBlank() &&
@@ -99,6 +107,10 @@ fun SettingsScreen(
             SettingsField("Public backend HTTPS URL", backend) { backend = it }
             SettingsSecretField("POC device token", backendToken) { backendToken = it }
             SettingsField("Vobiz caller ID (E.164)", callerId) { callerId = it }
+        }
+
+        SectionCard(title = "DIALING") {
+            CountryPickerRow(selectedIso = countryIso) { countryIso = it }
         }
 
         SectionCard(title = "CALL RECORDING") {
@@ -142,6 +154,7 @@ fun SettingsScreen(
                         backendToken = backendToken,
                         callerId = callerId,
                         recordingEnabled = recordingEnabled,
+                        defaultCountryIso = countryIso,
                     ),
                 )
             },
@@ -248,6 +261,62 @@ private fun BackendStatusRow(health: BackendHealth, onRefresh: () -> Unit) {
                     imageVector = Icons.Filled.Refresh,
                     contentDescription = "Check backend",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CountryPickerRow(selectedIso: String, onSelect: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = CountryCodes.countryForIso(selectedIso)
+    Box {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = true },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = "Default country",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = "Used to normalize dialed numbers when no SIM is present.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = selected?.label ?: "Auto",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Icon(
+                imageVector = Icons.Filled.ArrowDropDown,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("Auto (detect from SIM)") },
+                onClick = {
+                    onSelect("")
+                    expanded = false
+                },
+            )
+            CountryCodes.all.sortedBy { it.name }.forEach { country ->
+                DropdownMenuItem(
+                    text = { Text(country.label) },
+                    onClick = {
+                        onSelect(country.iso)
+                        expanded = false
+                    },
                 )
             }
         }

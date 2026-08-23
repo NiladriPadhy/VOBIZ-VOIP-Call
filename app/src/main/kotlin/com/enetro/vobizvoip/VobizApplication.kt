@@ -9,10 +9,12 @@ import android.media.RingtoneManager
 import android.os.Bundle
 import com.enetro.vobizvoip.data.BackendApi
 import com.enetro.vobizvoip.data.CallLogStore
+import com.enetro.vobizvoip.data.ContactsRepository
 import com.enetro.vobizvoip.data.SecureConfigStore
 import com.enetro.vobizvoip.domain.CallCoordinator
 import com.enetro.vobizvoip.media.WebRtcAudioSession
 import com.enetro.vobizvoip.signaling.SipClient
+import com.enetro.vobizvoip.telephony.CallStateMonitor
 
 class VobizApplication : Application() {
     lateinit var container: AppContainer
@@ -28,6 +30,12 @@ class VobizApplication : Application() {
         registerForegroundTracker()
         container = AppContainer(this)
     }
+
+    /**
+     * Safe accessor for components (e.g. the CallLogProvider) that may run before
+     * [onCreate] has assigned [container].
+     */
+    fun containerOrNull(): AppContainer? = if (this::container.isInitialized) container else null
 
     private fun registerForegroundTracker() {
         registerActivityLifecycleCallbacks(
@@ -96,12 +104,18 @@ class VobizApplication : Application() {
 }
 
 class AppContainer(application: Application) {
+    // Hoisted so the CallLogProvider (a separate ContentProvider component) can
+    // read the same in-memory call history the coordinator writes.
+    val callLogStore = CallLogStore(application)
+    val contactsRepository = ContactsRepository(application)
+    val callStateMonitor = CallStateMonitor(application)
     val coordinator = CallCoordinator(
         context = application,
         configStore = SecureConfigStore(application),
         sipClient = SipClient(),
         webRtc = WebRtcAudioSession(application),
         backendApi = BackendApi(),
-        callLogStore = CallLogStore(application),
+        callLogStore = callLogStore,
+        callStateMonitor = callStateMonitor,
     )
 }

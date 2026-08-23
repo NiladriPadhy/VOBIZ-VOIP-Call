@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -19,9 +20,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleIntent(intent)
+        val contactsRepository = (application as VobizApplication).container.contactsRepository
         setContent {
             VobizTheme {
-                RootScreen(coordinator)
+                RootScreen(coordinator, contactsRepository)
             }
         }
     }
@@ -53,7 +55,23 @@ class MainActivity : ComponentActivity() {
                 coordinator.declinePendingInbound()
             }
             ACTION_HANGUP -> coordinator.hangup()
+
+            // Open the dialer, pre-filled from a tel: URI when present.
+            Intent.ACTION_DIAL ->
+                coordinator.requestDial(numberFromIntent(intent).orEmpty(), autoCall = false)
+
+            // Place a call directly (tel: link, ACTION_CALL, or our custom action).
+            Intent.ACTION_VIEW, Intent.ACTION_CALL, ACTION_CALL ->
+                numberFromIntent(intent)?.let { coordinator.requestDial(it, autoCall = true) }
         }
+    }
+
+    /** Extracts a phone number from EXTRA_NUMBER or a `tel:` data URI. */
+    private fun numberFromIntent(intent: Intent): String? {
+        intent.getStringExtra(EXTRA_NUMBER)?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
+        val data = intent.data ?: return null
+        if (!data.scheme.equals("tel", ignoreCase = true)) return null
+        return Uri.decode(data.schemeSpecificPart)?.trim()?.takeIf { it.isNotBlank() }
     }
 
     private fun showPending(intent: Intent) {
@@ -75,7 +93,11 @@ class MainActivity : ComponentActivity() {
         const val ACTION_ANSWER_PENDING = "com.enetro.vobizvoip.action.ANSWER_PENDING"
         const val ACTION_DECLINE_PENDING = "com.enetro.vobizvoip.action.DECLINE_PENDING"
         const val ACTION_HANGUP = "com.enetro.vobizvoip.action.HANGUP"
+
+        /** Public app-to-app action to place a call; pass the number in EXTRA_NUMBER. */
+        const val ACTION_CALL = "com.enetro.vobizvoip.action.CALL"
         const val EXTRA_PENDING_CALL_ID = "pendingCallId"
         const val EXTRA_CALLER = "caller"
+        const val EXTRA_NUMBER = "number"
     }
 }

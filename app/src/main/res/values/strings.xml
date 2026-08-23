@@ -3,4 +3,6 @@
     <string name="app_name">Enetro VoIP</string>
     <string name="incoming_call_channel">Incoming calls</string>
     <string name="active_call_channel">Active calls</string>
+    <string name="call_log_permission_label">Read Enetro VoIP call log</string>
+    <string name="call_log_permission_description">Allows the app to read Enetro VoIP call history and recordings.</string>
 </resources>

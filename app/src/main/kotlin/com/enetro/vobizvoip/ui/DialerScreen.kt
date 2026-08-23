@@ -14,10 +14,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -25,11 +29,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.enetro.vobizvoip.data.Contact
 import com.enetro.vobizvoip.ui.theme.AnswerGreen
 
 @Composable
@@ -38,15 +43,66 @@ fun DialerScreen(
     onNumberChange: (String) -> Unit,
     canCall: Boolean,
     onCall: (String) -> Unit,
+    matches: List<Contact>,
     modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(horizontal = 24.dp),
+        modifier = modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.weight(1f))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+        ) {
+            if (matches.isNotEmpty()) {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    items(matches, key = { "${it.id}-${it.number}" }) { contact ->
+                        ContactRow(contact = contact, onCall = onCall)
+                    }
+                }
+            }
+        }
+
+        NumberBar(
+            number = number,
+            onBackspace = { onNumberChange(number.dropLast(1)) },
+            onClear = { onNumberChange("") },
+        )
+        Spacer(Modifier.height(14.dp))
+        DialPad(
+            onDigit = { onNumberChange(number + it) },
+            onPlus = { onNumberChange(number + "+") },
+        )
+        Spacer(Modifier.height(18.dp))
+        Button(
+            onClick = { onCall(number) },
+            enabled = canCall && number.isNotBlank(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = AnswerGreen,
+                contentColor = Color.White,
+                disabledContainerColor = AnswerGreen.copy(alpha = 0.4f),
+                disabledContentColor = Color.White.copy(alpha = 0.7f),
+            ),
+            modifier = Modifier.height(56.dp).widthIn(min = 140.dp),
+        ) {
+            Icon(Icons.Filled.Call, contentDescription = null, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.size(8.dp))
+            Text("Call", style = MaterialTheme.typography.titleMedium)
+        }
+        Spacer(Modifier.height(22.dp))
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun NumberBar(number: String, onBackspace: () -> Unit, onClear: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
         Text(
             text = number.ifEmpty { "Enter number" },
             style = MaterialTheme.typography.displaySmall,
@@ -57,44 +113,24 @@ fun DialerScreen(
             },
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = "E.164 format, e.g. +14155550123",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(28.dp))
-        DialPad(
-            onDigit = { onNumberChange(number + it) },
-            onPlus = { onNumberChange(number + "+") },
-        )
-        Spacer(Modifier.height(20.dp))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = 320.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(Modifier.weight(1f))
-            RoundCallButton(
-                icon = Icons.Filled.Call,
-                background = AnswerGreen,
-                contentDescription = "Call",
-                enabled = canCall && number.isNotBlank(),
-                onClick = { onCall(number) },
-            )
-            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                if (number.isNotEmpty()) {
-                    BackspaceButton(
-                        onClick = { onNumberChange(number.dropLast(1)) },
-                        onLongClick = { onNumberChange("") },
+        if (number.isNotEmpty()) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .combinedClickable(onClick = onBackspace, onLongClick = onClear),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Backspace,
+                        contentDescription = "Delete",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
         }
-        Spacer(Modifier.weight(1f))
     }
 }
 
@@ -110,8 +146,8 @@ private val dialRows = listOf(
 @Composable
 private fun DialPad(onDigit: (String) -> Unit, onPlus: () -> Unit) {
     Column(
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-        modifier = Modifier.widthIn(max = 320.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.widthIn(max = 320.dp).padding(horizontal = 24.dp),
     ) {
         dialRows.forEach { row ->
             Row(
@@ -161,23 +197,5 @@ private fun DialButton(
                 )
             }
         }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun BackspaceButton(onClick: () -> Unit, onLongClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(56.dp)
-            .clip(CircleShape)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.Backspace,
-            contentDescription = "Delete",
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }

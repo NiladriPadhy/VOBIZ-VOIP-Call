@@ -31,10 +31,12 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -42,14 +44,22 @@ import com.enetro.vobizvoip.data.CallDirection
 import com.enetro.vobizvoip.data.CallLogEntry
 import com.enetro.vobizvoip.data.CallResult
 import com.enetro.vobizvoip.data.Recording
+import com.enetro.vobizvoip.data.RecordingMatcher
 import com.enetro.vobizvoip.ui.theme.AnswerGreen
-import kotlin.math.abs
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 
+/**
+ * The recents list grouped into Today / Yesterday / Older sections, matching the
+ * native dialer. [nameResolver] maps a number to a contact name when available.
+ */
 @Composable
-fun CallLogScreen(
+fun CallLogList(
     entries: List<CallLogEntry>,
     recordings: List<Recording>,
     player: RecordingPlayer,
+    nameResolver: (String) -> String?,
     onDial: (String) -> Unit,
     onOpenInKeypad: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -58,20 +68,36 @@ fun CallLogScreen(
         EmptyRecents(modifier)
         return
     }
+    val grouped = remember(entries) { groupByDay(entries) }
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 8.dp),
+        contentPadding = PaddingValues(bottom = 16.dp),
     ) {
-        items(entries, key = { it.id }) { entry ->
-            CallLogRow(
-                entry = entry,
-                recording = recordingForEntry(entry, recordings),
-                player = player,
-                onOpen = { onOpenInKeypad(entry.number) },
-                onDial = { onDial(entry.number) },
-            )
+        grouped.forEach { (label, sectionEntries) ->
+            item(key = "header-$label") { SectionHeader(label) }
+            items(sectionEntries, key = { it.id }) { entry ->
+                CallLogRow(
+                    entry = entry,
+                    recording = RecordingMatcher.match(entry, recordings),
+                    player = player,
+                    displayName = nameResolver(entry.number),
+                    onOpen = { onOpenInKeypad(entry.number) },
+                    onDial = { onDial(entry.number) },
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun SectionHeader(label: String) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 4.dp),
+    )
 }
 
 @Composable
@@ -79,10 +105,12 @@ private fun CallLogRow(
     entry: CallLogEntry,
     recording: Recording?,
     player: RecordingPlayer,
+    displayName: String?,
     onOpen: () -> Unit,
     onDial: () -> Unit,
 ) {
     val missed = entry.result == CallResult.MISSED
+    val title = displayName?.takeIf { it.isNotBlank() } ?: displayNumber(entry.number)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -90,11 +118,11 @@ private fun CallLogRow(
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Avatar(label = displayNumber(entry.number), size = 46.dp)
+        Avatar(label = title, size = 46.dp)
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                text = displayNumber(entry.number),
+                text = title,
                 style = MaterialTheme.typography.titleMedium,
                 color = if (missed) {
                     MaterialTheme.colorScheme.error
@@ -124,14 +152,12 @@ private fun CallLogRow(
             if (recording != null) {
                 RecordingButton(recordingId = recording.id, player = player)
             }
-            if (entry.number.startsWith("+")) {
-                IconButton(onClick = onDial) {
-                    Icon(
-                        imageVector = Icons.Filled.Call,
-                        contentDescription = "Call ${displayNumber(entry.number)}",
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                }
+            IconButton(onClick = onDial) {
+                Icon(
+                    imageVector = Icons.Filled.Call,
+                    contentDescription = "Call $title",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
             }
         }
     }
@@ -163,7 +189,7 @@ private fun RecordingButton(recordingId: String, player: RecordingPlayer) {
 }
 
 @Composable
-private fun EmptyRecents(modifier: Modifier = Modifier) {
+internal fun EmptyRecents(modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -201,6 +227,31 @@ private fun EmptyRecents(modifier: Modifier = Modifier) {
     }
 }
 
+private enum class DayBucket(val label: String) {
+    TODAY("Today"),
+    YESTERDAY("Yesterday"),
+    OLDER("Older"),
+}
+
+/** Buckets newest-first [entries] into Today / Yesterday / Older, preserving order. */
+private fun groupByDay(entries: List<CallLogEntry>): List<Pair<String, List<CallLogEntry>>> {
+    val zone = ZoneId.systemDefault()
+    val today = LocalDate.now(zone)
+    val yesterday = today.minusDays(1)
+    return entries
+        .groupBy { entry ->
+            val date = Instant.ofEpochMilli(entry.startedAt).atZone(zone).toLocalDate()
+            when {
+                date.isEqual(today) -> DayBucket.TODAY
+                date.isEqual(yesterday) -> DayBucket.YESTERDAY
+                else -> DayBucket.OLDER
+            }
+        }
+        .toList()
+        .sortedBy { it.first.ordinal }
+        .map { (bucket, items) -> bucket.label to items }
+}
+
 private fun subtitleFor(entry: CallLogEntry): String {
     val label = when (entry.result) {
         CallResult.COMPLETED -> if (entry.direction == CallDirection.INCOMING) "Incoming" else "Outgoing"
@@ -232,23 +283,4 @@ private fun directionTint(entry: CallLogEntry) = when (entry.result) {
     } else {
         MaterialTheme.colorScheme.primary
     }
-}
-
-private const val RECORDING_MATCH_TOLERANCE_MS = 5 * 60_000L
-
-/**
- * Recordings are produced server-side and can't carry the app's local call id,
- * so match by direction + phone number (last 10 digits) and the closest start
- * time within a tolerance window.
- */
-private fun recordingForEntry(entry: CallLogEntry, recordings: List<Recording>): Recording? {
-    val entryDigits = entry.number.filter(Char::isDigit).takeLast(10)
-    if (entryDigits.isEmpty()) return null
-    return recordings
-        .filter {
-            it.direction == entry.direction &&
-                it.number.filter(Char::isDigit).takeLast(10) == entryDigits
-        }
-        .minByOrNull { abs(it.startedAtEpochMs - entry.startedAt) }
-        ?.takeIf { abs(it.startedAtEpochMs - entry.startedAt) <= RECORDING_MATCH_TOLERANCE_MS }
 }

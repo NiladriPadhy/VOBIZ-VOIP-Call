@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
@@ -14,22 +15,24 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Dialpad
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
@@ -39,12 +42,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -57,21 +62,29 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.enetro.vobizvoip.data.AppConfig
 import com.enetro.vobizvoip.data.CallLogEntry
+import com.enetro.vobizvoip.data.Contact
+import com.enetro.vobizvoip.data.ContactsRepository
 import com.enetro.vobizvoip.data.Recording
+import com.enetro.vobizvoip.data.filterByQuery
 import com.enetro.vobizvoip.domain.BackendHealth
 import com.enetro.vobizvoip.domain.CallCoordinator
 import com.enetro.vobizvoip.domain.CallPhase
 import com.enetro.vobizvoip.domain.CallUiState
+import com.enetro.vobizvoip.domain.PendingDial
 import com.enetro.vobizvoip.signaling.RegistrationState
 import com.google.firebase.installations.FirebaseInstallations
 import com.google.firebase.messaging.FirebaseMessaging
+import kotlinx.coroutines.launch
 
 @Composable
-fun RootScreen(coordinator: CallCoordinator) {
+fun RootScreen(coordinator: CallCoordinator, contactsRepository: ContactsRepository) {
     val state by coordinator.state.collectAsStateWithLifecycle()
     val callLog by coordinator.callLog.collectAsStateWithLifecycle()
     val recordings by coordinator.recordings.collectAsStateWithLifecycle()
+    val contacts by contactsRepository.contacts.collectAsStateWithLifecycle()
+    val pendingDial by coordinator.pendingDial.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     var pendingAudioAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -82,6 +95,7 @@ fun RootScreen(coordinator: CallCoordinator) {
             PackageManager.PERMISSION_GRANTED
         if (granted) pendingAudioAction?.invoke()
         pendingAudioAction = null
+        applyGrantedPlatformPermissions(context, coordinator, contactsRepository, scope)
     }
     val withAudioPermission: (() -> Unit) -> Unit = { action ->
         if (
@@ -100,9 +114,13 @@ fun RootScreen(coordinator: CallCoordinator) {
         requestMissingPermissions(context, permissionLauncher)
         registerForPush(coordinator)
     }
+    val onPlaceCall: (String) -> Unit = { destination ->
+        withAudioPermission { coordinator.placeCall(destination) }
+    }
 
     LaunchedEffect(Unit) {
         requestMissingPermissions(context, permissionLauncher)
+        applyGrantedPlatformPermissions(context, coordinator, contactsRepository, scope)
     }
 
     // Re-assert this device's FCM installation ID on every launch once the
@@ -152,13 +170,20 @@ fun RootScreen(coordinator: CallCoordinator) {
             onHangup = coordinator::hangup,
         )
 
-        else -> HomeScaffold(
+        else -> MainShell(
             state = state,
             callLog = callLog,
             recordings = recordings,
+            contacts = contacts,
+            contactsHasPermission = contactsRepository.hasPermission(),
+            pendingDial = pendingDial,
+            onConsumePendingDial = coordinator::consumePendingDial,
+            onRequestContactsPermission = {
+                permissionLauncher.launch(arrayOf(Manifest.permission.READ_CONTACTS))
+            },
             onReconnect = coordinator::reconnect,
             onCheckBackend = coordinator::checkBackendHealth,
-            onPlaceCall = { destination -> withAudioPermission { coordinator.placeCall(destination) } },
+            onPlaceCall = onPlaceCall,
             onClearCallLog = coordinator::clearCallLog,
             onRefreshRecordings = coordinator::refreshRecordings,
             onSaveConfig = onSaveConfig,
@@ -166,12 +191,24 @@ fun RootScreen(coordinator: CallCoordinator) {
     }
 }
 
+private enum class MainTab(val label: String, val icon: ImageVector) {
+    HOME("Home", Icons.Filled.Home),
+    KEYPAD("Keypad", Icons.Filled.Dialpad),
+}
+
+private enum class DrawerScreen { CONTACTS, SETTINGS }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun HomeScaffold(
+private fun MainShell(
     state: CallUiState,
     callLog: List<CallLogEntry>,
     recordings: List<Recording>,
+    contacts: List<Contact>,
+    contactsHasPermission: Boolean,
+    pendingDial: PendingDial?,
+    onConsumePendingDial: () -> Unit,
+    onRequestContactsPermission: () -> Unit,
     onReconnect: () -> Unit,
     onCheckBackend: () -> Unit,
     onPlaceCall: (String) -> Unit,
@@ -182,8 +219,11 @@ private fun HomeScaffold(
     StatusBarColor(MaterialTheme.colorScheme.background, darkIcons = !isSystemInDarkTheme())
 
     val context = LocalContext.current
-    var currentTab by rememberSaveable { mutableStateOf(HomeTab.KEYPAD) }
+    val scope = rememberCoroutineScope()
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    var currentTab by rememberSaveable { mutableStateOf(MainTab.HOME) }
     var dialNumber by rememberSaveable { mutableStateOf("") }
+    var drawerScreen by rememberSaveable { mutableStateOf<DrawerScreen?>(null) }
     var showClearDialog by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val recordingPlayer = remember(
@@ -202,82 +242,121 @@ private fun HomeScaffold(
         onDispose { recordingPlayer.stop() }
     }
     LaunchedEffect(currentTab) {
-        if (currentTab == HomeTab.RECENTS) onRefreshRecordings() else recordingPlayer.stop()
+        if (currentTab == MainTab.HOME) onRefreshRecordings() else recordingPlayer.stop()
     }
-
     LaunchedEffect(state.error) {
         state.error?.let { snackbarHostState.showSnackbar(it) }
     }
+    LaunchedEffect(pendingDial) {
+        val dial = pendingDial ?: return@LaunchedEffect
+        drawerScreen = null
+        if (dial.autoCall && dial.number.isNotBlank()) {
+            onPlaceCall(dial.number)
+        } else {
+            dialNumber = dial.number
+            currentTab = MainTab.KEYPAD
+        }
+        onConsumePendingDial()
+    }
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            TopAppBar(
-                title = { BrandTitle() },
-                actions = {
-                    ConnectionChip(state.registration, onReconnect, prefix = "SIP")
-                    if (currentTab == HomeTab.RECENTS && callLog.isNotEmpty()) {
-                        IconButton(onClick = { showClearDialog = true }) {
-                            Icon(
-                                imageVector = Icons.Filled.DeleteOutline,
-                                contentDescription = "Clear recents",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    Spacer(Modifier.width(8.dp))
+    BackHandler(enabled = drawerScreen != null) { drawerScreen = null }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        gesturesEnabled = drawerScreen == null,
+        drawerContent = {
+            AppDrawer(
+                onContacts = {
+                    scope.launch { drawerState.close() }
+                    drawerScreen = DrawerScreen.CONTACTS
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
+                onSettings = {
+                    scope.launch { drawerState.close() }
+                    drawerScreen = DrawerScreen.SETTINGS
+                },
+                onClearHistory = {
+                    scope.launch { drawerState.close() }
+                    showClearDialog = true
+                },
             )
         },
-        bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                HomeTab.entries.forEach { tab ->
-                    NavigationBarItem(
-                        selected = currentTab == tab,
-                        onClick = { currentTab = tab },
-                        icon = { Icon(tab.icon, contentDescription = tab.label) },
-                        label = { Text(tab.label) },
-                    )
-                }
-            }
-        },
-    ) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-        ) {
-            when (currentTab) {
-                HomeTab.KEYPAD -> DialerScreen(
-                    number = dialNumber,
-                    onNumberChange = { dialNumber = it },
-                    canCall = state.registration == RegistrationState.REGISTERED,
+    ) {
+        when (drawerScreen) {
+            DrawerScreen.CONTACTS -> OverlayScaffold("Contacts", onBack = { drawerScreen = null }) { modifier ->
+                ContactsScreen(
+                    contacts = contacts,
+                    hasPermission = contactsHasPermission,
+                    onRequestPermission = onRequestContactsPermission,
                     onCall = onPlaceCall,
+                    modifier = modifier,
                 )
+            }
 
-                HomeTab.RECENTS -> CallLogScreen(
-                    entries = callLog,
-                    recordings = recordings,
-                    player = recordingPlayer,
-                    onDial = onPlaceCall,
-                    onOpenInKeypad = { number ->
-                        dialNumber = number
-                        currentTab = HomeTab.KEYPAD
-                    },
-                )
-
-                HomeTab.SETTINGS -> SettingsScreen(
+            DrawerScreen.SETTINGS -> OverlayScaffold("Settings", onBack = { drawerScreen = null }) { modifier ->
+                SettingsScreen(
                     initial = state.config,
                     registration = state.registration,
                     backendHealth = state.backendHealth,
                     onReconnect = onReconnect,
                     onCheckBackend = onCheckBackend,
                     onSave = onSaveConfig,
+                    modifier = modifier,
                 )
+            }
+
+            null -> Scaffold(
+                containerColor = MaterialTheme.colorScheme.background,
+                snackbarHost = { SnackbarHost(snackbarHostState) },
+                bottomBar = {
+                    NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                        MainTab.entries.forEach { tab ->
+                            NavigationBarItem(
+                                selected = currentTab == tab,
+                                onClick = { currentTab = tab },
+                                icon = { Icon(tab.icon, contentDescription = tab.label) },
+                                label = { Text(tab.label) },
+                            )
+                        }
+                    }
+                },
+            ) { padding ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                ) {
+                    if (state.registration != RegistrationState.REGISTERED) {
+                        ConnectionBanner(state.registration, onReconnect)
+                    }
+                    Box(Modifier.weight(1f)) {
+                        when (currentTab) {
+                            MainTab.HOME -> HomeScreen(
+                                entries = callLog,
+                                recordings = recordings,
+                                contacts = contacts,
+                                player = recordingPlayer,
+                                onOpenDrawer = { scope.launch { drawerState.open() } },
+                                onCall = onPlaceCall,
+                                onOpenInKeypad = { number ->
+                                    dialNumber = number
+                                    currentTab = MainTab.KEYPAD
+                                },
+                            )
+
+                            MainTab.KEYPAD -> DialerScreen(
+                                number = dialNumber,
+                                onNumberChange = { dialNumber = it },
+                                canCall = state.registration == RegistrationState.REGISTERED,
+                                onCall = onPlaceCall,
+                                matches = if (dialNumber.isBlank()) {
+                                    emptyList()
+                                } else {
+                                    contacts.filterByQuery(dialNumber)
+                                },
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -285,20 +364,63 @@ private fun HomeScaffold(
     if (showClearDialog) {
         AlertDialog(
             onDismissRequest = { showClearDialog = false },
-            title = { Text("Clear recents?") },
-            text = { Text("This removes all call history from this device.") },
+            title = { Text("Clear call history?") },
+            text = { Text("This will delete all calls from your history") },
             confirmButton = {
                 TextButton(
                     onClick = {
                         onClearCallLog()
                         showClearDialog = false
                     },
-                ) { Text("Clear") }
+                ) { Text("OK") }
             },
             dismissButton = {
                 TextButton(onClick = { showClearDialog = false }) { Text("Cancel") }
             },
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun OverlayScaffold(
+    title: String,
+    onBack: () -> Unit,
+    content: @Composable (Modifier) -> Unit,
+) {
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            TopAppBar(
+                title = { Text(title) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                ),
+            )
+        },
+    ) { padding ->
+        content(
+            Modifier
+                .fillMaxSize()
+                .padding(padding),
+        )
+    }
+}
+
+@Composable
+private fun ConnectionBanner(state: RegistrationState, onReconnect: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ConnectionChip(state = state, onReconnect = onReconnect, prefix = "SIP")
     }
 }
 
@@ -371,12 +493,6 @@ private fun BrandTitle() {
     }
 }
 
-private enum class HomeTab(val label: String, val icon: ImageVector) {
-    KEYPAD("Keypad", Icons.Filled.Dialpad),
-    RECENTS("Recents", Icons.Filled.History),
-    SETTINGS("Settings", Icons.Filled.Settings),
-}
-
 private val ACTIVE_PHASES = setOf(
     CallPhase.OUTGOING,
     CallPhase.RINGING,
@@ -388,6 +504,8 @@ private val ACTIVE_PHASES = setOf(
 private fun requiredPermissions(): Array<String> = buildList {
     add(Manifest.permission.RECORD_AUDIO)
     add(Manifest.permission.BLUETOOTH_CONNECT)
+    add(Manifest.permission.READ_CONTACTS)
+    add(Manifest.permission.READ_PHONE_STATE)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         add(Manifest.permission.POST_NOTIFICATIONS)
     }
@@ -402,6 +520,23 @@ private fun requestMissingPermissions(
     }
     if (missing.isNotEmpty()) {
         launcher.launch(missing.toTypedArray())
+    }
+}
+
+/** Starts cellular monitoring and loads contacts once their permissions exist. */
+private fun applyGrantedPlatformPermissions(
+    context: Context,
+    coordinator: CallCoordinator,
+    contactsRepository: ContactsRepository,
+    scope: kotlinx.coroutines.CoroutineScope,
+) {
+    if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) ==
+        PackageManager.PERMISSION_GRANTED
+    ) {
+        coordinator.startCellularMonitoring()
+    }
+    if (contactsRepository.hasPermission()) {
+        scope.launch { contactsRepository.refresh() }
     }
 }
 

@@ -12,10 +12,14 @@ import com.enetro.vobizvoip.data.CallDirection
 import com.enetro.vobizvoip.data.CallLogEntry
 import com.enetro.vobizvoip.data.CallLogStore
 import com.enetro.vobizvoip.data.CallResult
+import com.enetro.vobizvoip.data.CountryCodes
 import com.enetro.vobizvoip.data.Recording
 import com.enetro.vobizvoip.data.SecureConfigStore
 import com.enetro.vobizvoip.media.WebRtcAudioSession
 import com.enetro.vobizvoip.service.CallForegroundService
+import com.enetro.vobizvoip.telephony.CallStateMonitor
+import com.enetro.vobizvoip.telephony.CellularCallState
+import com.enetro.vobizvoip.telephony.TelephonyInfo
 import com.enetro.vobizvoip.signaling.RegistrationState
 import com.enetro.vobizvoip.signaling.SipClient
 import com.enetro.vobizvoip.signaling.SipEvent
@@ -77,6 +81,9 @@ private data class ActiveCallRecord(
     var connectedAt: Long? = null,
 )
 
+/** A dial requested from outside the UI (e.g. a `tel:` intent from another app). */
+data class PendingDial(val number: String, val autoCall: Boolean)
+
 class CallCoordinator(
     private val context: Context,
     private val configStore: SecureConfigStore,
@@ -84,6 +91,7 @@ class CallCoordinator(
     private val webRtc: WebRtcAudioSession,
     private val backendApi: BackendApi,
     private val callLogStore: CallLogStore,
+    private val callStateMonitor: CallStateMonitor,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val _state = MutableStateFlow(CallUiState(config = configStore.load()))
@@ -91,11 +99,19 @@ class CallCoordinator(
     private var incomingRingtone: Ringtone? = null
     private var inboundStatusJob: Job? = null
     private var activeCallRecord: ActiveCallRecord? = null
+    private var mutedForCellularCall = false
     private val _recordings = MutableStateFlow<List<Recording>>(emptyList())
+    private val _pendingDial = MutableStateFlow<PendingDial?>(null)
 
     val state: StateFlow<CallUiState> = _state
     val callLog: StateFlow<List<CallLogEntry>> = callLogStore.entries
     val recordings: StateFlow<List<Recording>> = _recordings
+
+    /** A dial routed in from an intent, consumed by the UI once handled. */
+    val pendingDial: StateFlow<PendingDial?> = _pendingDial
+
+    /** Live cellular (native phone) call state, for UI/diagnostics. */
+    val cellularCallState: StateFlow<CellularCallState> = callStateMonitor.state
 
     fun clearCallLog() = callLogStore.clear()
 
@@ -126,6 +142,9 @@ class CallCoordinator(
         }
         scope.launch {
             sipClient.events.collect(::handleSipEvent)
+        }
+        scope.launch {
+            callStateMonitor.state.collect(::onCellularStateChanged)
         }
         scope.launch {
             var lastPhase: CallPhase? = null
@@ -225,9 +244,9 @@ class CallCoordinator(
     }
 
     fun placeCall(destination: String) {
-        val normalized = destination.trim().replace(" ", "")
+        val normalized = PhoneNumberNormalizer.normalize(destination, effectiveCallingCode())
         if (!E164.matches(normalized)) {
-            fail("Enter a destination in E.164 format, for example +919876543210")
+            fail("Enter a valid phone number to call")
             return
         }
         activeCallRecord = ActiveCallRecord(
@@ -236,6 +255,52 @@ class CallCoordinator(
             startedAt = System.currentTimeMillis(),
         )
         startOutgoing(normalized, prepareBackend = true)
+    }
+
+    /**
+     * The E.164 calling code used to normalize dialed numbers. The SIM region
+     * wins when a SIM is present; otherwise the user's configured default (from
+     * Settings) is used, finally falling back to [CountryCodes.DEFAULT_ISO].
+     */
+    fun effectiveCallingCode(): String {
+        val candidates = listOfNotNull(
+            TelephonyInfo.simCountryIso(context),
+            _state.value.config.defaultCountryIso.ifBlank { null },
+            CountryCodes.DEFAULT_ISO,
+        )
+        return candidates.firstNotNullOfOrNull { CountryCodes.callingCodeForIso(it) } ?: "91"
+    }
+
+    /** Records a dial routed in from an intent so the UI can prefill or auto-call. */
+    fun requestDial(number: String, autoCall: Boolean) {
+        _pendingDial.value = PendingDial(number, autoCall)
+    }
+
+    fun consumePendingDial() {
+        _pendingDial.value = null
+    }
+
+    /** Begins observing the native cellular call state (needs READ_PHONE_STATE). */
+    fun startCellularMonitoring() = callStateMonitor.start()
+
+    private fun onCellularStateChanged(cellular: CellularCallState) {
+        when (cellular) {
+            CellularCallState.OFFHOOK -> {
+                if (_state.value.phase == CallPhase.ACTIVE && !_state.value.muted) {
+                    mutedForCellularCall = true
+                    setMuted(true)
+                    Log.i("VobizCall", "Native cellular call off-hook; auto-muted VoIP mic")
+                }
+            }
+            CellularCallState.IDLE -> {
+                if (mutedForCellularCall) {
+                    mutedForCellularCall = false
+                    setMuted(false)
+                    Log.i("VobizCall", "Native cellular call ended; restored VoIP mic")
+                }
+            }
+            CellularCallState.RINGING -> Unit
+        }
     }
 
     fun acceptIncoming() {
