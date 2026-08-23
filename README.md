@@ -7,8 +7,9 @@ The repository contains:
 
 - `app/` — Android 12+ Jetpack Compose application;
 - `backend/` — local TypeScript Answer URL, call-state, and FCM service;
-- `DOCS/VOBIZ_ANDROID_POC_DESIGN.md` — approved design;
-- `DOCS/SETUP_GUIDE.md` — configuration and run instructions.
+- `DOCS/CONFIGURATION_AND_INTEGRATION.md` — Settings values and app-to-app contracts (dial, call state, call log);
+- `DOCS/SETUP_GUIDE.md` — install, tunnel, and test order;
+- `DOCS/VOBIZ_ANDROID_POC_DESIGN.md` — approved design.
 
 ## Screenshots
 
@@ -30,6 +31,9 @@ The app mimics a native phone dialer:
   to a **Default country** chosen in Settings when no SIM is present.
 
 ## App integration (intents, call-log provider, call-state monitoring)
+
+Full field list, intent extras, provider columns, and examples:
+[DOCS/CONFIGURATION_AND_INTEGRATION.md](DOCS/CONFIGURATION_AND_INTEGRATION.md).
 
 The app is a SIP/WebRTC softphone, so its calls never touch Android's system
 `CallLog`. Instead it keeps its **own** call history and exposes the integration

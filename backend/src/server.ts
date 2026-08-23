@@ -19,7 +19,6 @@ const env = z
     PUBLIC_URL: z.string().url(),
     DEVICE_TOKEN: z.string().min(32),
     WEBHOOK_TOKEN: z.string().min(32),
-    SIP_ENDPOINT: z.string().regex(/^sip:[^@\s]+@[^@\s]+$/),
     DEFAULT_COUNTRY_CODE: z.string().regex(/^\d{1,3}$/).default("91"),
     MAX_CALL_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
     VOBIZ_AUTH_ID: z.string().optional(),
@@ -89,7 +88,6 @@ const pendingJoinByEndpoint = new Map<string, string>();
 const outboundByEndpoint = new Map<string, OutboundIntent>();
 const directInboundByEndpoint = new Map<string, DirectInboundState>();
 const recordByEndpoint = new Map<string, boolean>();
-const sipEndpointUser = env.SIP_ENDPOINT.substring(4).split("@")[0]!;
 const webhookBaseUrl =
   `${env.PUBLIC_URL.replace(/\/$/, "")}/webhooks/vobiz/${env.WEBHOOK_TOKEN}`;
 const RECORDINGS_FILE = process.env.RECORDINGS_FILE ?? "./data/recordings.json";
@@ -109,6 +107,7 @@ app.get("/health", (_request, response) => {
     status: "ok",
     firebase: firebaseMessaging !== null,
     pendingCalls: pendingCalls.size,
+    registeredEndpoints: callerIdByEndpoint.size,
   });
 });
 
@@ -139,14 +138,15 @@ app.post(
       },
       "Answer webhook received",
     );
-    // Only the app's own legs (an outbound dial, or the leg that joins an
-    // inbound conference) originate from our SIP endpoint user. Everything else
-    // Vobiz sends to this Voice App is a real inbound PSTN caller. Do NOT key
-    // off RouteType: Vobiz reports RouteType="sip" for the app's SIP leg and can
-    // also report it for SIP-trunked inbound, which would misclassify a real
-    // caller as outbound and drop the call.
-    const isSipLeg = sipUser(from) === sipEndpointUser;
-    if (!isSipLeg) {
+    // Only a registered app SIP user (outbound dial or inbound-conference join)
+    // is a SIP-originated leg. Everything else Vobiz sends to this Voice App is
+    // a real inbound PSTN caller. Do NOT key off RouteType: Vobiz reports
+    // RouteType="sip" for the app's SIP leg and can also report it for
+    // SIP-trunked inbound, which would misclassify a real caller as outbound
+    // and drop the call. Devices register their SIP username and caller ID;
+    // there is no server-wide SIP endpoint.
+    const endpoint = originatingEndpoint(from);
+    if (!endpoint) {
       const did = normalizeNumber(to) ?? normalizeNumber(sipHeaderTo);
       const caller = normalizeNumber(from) ?? sanitizeCaller(from);
       if (!did) {
@@ -156,15 +156,31 @@ app.post(
         );
         return;
       }
-      // Park the PSTN caller in a per-call conference and wake the device over
-      // FCM. This is the only inbound path that also works when the app is
-      // backgrounded or terminated: an offline endpoint cannot receive a direct
-      // SIP INVITE, so instead the app answers the push, registers on demand,
-      // and dials the DID to join the same conference (see /answer SIP-leg
-      // branch and POST /calls/:id/accept).
-      const pending = createPendingCall(caller, did, callUuid || undefined);
+      // Park the PSTN caller in a per-call conference and wake the device that
+      // registered this DID. An offline endpoint cannot receive a direct SIP
+      // INVITE, so the app answers the push, registers on demand, and dials
+      // the DID to join the same conference (see /answer SIP-leg branch and
+      // POST /calls/:id/accept).
+      const targetEndpoint = endpointForDid(did);
+      if (!targetEndpoint) {
+        logger.warn(
+          { did: redactIdentity(did) },
+          "No device registered this DID",
+        );
+        sendXml(
+          response.status(404),
+          speakAndHangupXml("No device is registered for this number."),
+        );
+        return;
+      }
+      const pending = createPendingCall(
+        caller,
+        did,
+        targetEndpoint,
+        callUuid || undefined,
+      );
       if (callUuid) {
-        directInboundByEndpoint.set(sipEndpointUser, {
+        directInboundByEndpoint.set(targetEndpoint, {
           callUuid,
           active: true,
         });
@@ -177,26 +193,25 @@ app.post(
           did: redactIdentity(did),
           routeType: routeType || "none",
           callUuid: callUuid || "none",
-          endpoint: sipEndpointUser,
+          endpoint: targetEndpoint,
           pendingCallId: pending.id,
           roomId: pending.roomId,
         },
         "Inbound PSTN parked in conference; waking device via FCM",
       );
       await notifyIncomingCall(pending);
-      const inboundRecord = recordByEndpoint.get(sipEndpointUser) ?? true;
+      const inboundRecord = recordByEndpoint.get(targetEndpoint) ?? true;
       sendXml(
         response,
         conferenceParkXml(
           pending.roomId,
           normalizeNumber(from) ?? caller,
           inboundRecord,
+          targetEndpoint,
         ),
       );
       return;
     }
-
-    const endpoint = sipUser(from) || sipEndpointUser;
     logger.info(
       {
         from: redactIdentity(from),
@@ -271,10 +286,11 @@ app.post(
         pendingJoinByEndpoint.delete(pending.endpoint);
       }
     }
-    const directInbound = directInboundByEndpoint.get(sipEndpointUser);
-    if (directInbound?.callUuid === callUuid) {
-      directInbound.active = false;
-      directInbound.endedAt = Date.now();
+    for (const state of directInboundByEndpoint.values()) {
+      if (state.callUuid === callUuid) {
+        state.active = false;
+        state.endedAt = Date.now();
+      }
     }
     response.sendStatus(204);
   },
@@ -335,9 +351,9 @@ app.post(
     const direction =
       field(request, "dir").toLowerCase() === "incoming" ? "incoming" : "outgoing";
     const number = field(request, "num");
-    const endpoint = field(request, "ep") || sipEndpointUser;
+    const endpoint = field(request, "ep");
     const callUuid = field(request, "CallUUID", "CallUuid", "RequestUUID");
-    if (recordUrl) {
+    if (recordUrl && endpoint) {
       addRecording({ endpoint, number, direction, url: recordUrl, durationSeconds, callUuid });
     } else {
       logger.info(
@@ -383,7 +399,13 @@ app.post("/devices/register", (request, response) => {
   if (input.callerId) {
     callerIdByEndpoint.set(input.endpoint, input.callerId);
   }
-  logger.info({ endpoint: input.endpoint }, "FCM installation registered");
+  logger.info(
+    {
+      endpoint: input.endpoint,
+      callerId: input.callerId ? redactIdentity(input.callerId) : "none",
+    },
+    "FCM installation registered",
+  );
   response.sendStatus(204);
 });
 
@@ -560,7 +582,6 @@ app.listen(env.PORT, () => {
     {
       port: env.PORT,
       answerUrl: `${env.PUBLIC_URL}/webhooks/vobiz/[REDACTED]/answer`,
-      endpoint: sipEndpointUser,
       firebase: firebaseMessaging !== null,
     },
     "Vobiz Android POC backend listening",
@@ -588,6 +609,7 @@ function authenticateDevice(
 function createPendingCall(
   caller: string,
   did: string,
+  endpoint: string,
   callUuid?: string,
 ): PendingCall {
   const now = Date.now();
@@ -601,7 +623,7 @@ function createPendingCall(
     createdAt: now,
     expiresAt: now + 30_000,
     status: "ringing",
-    endpoint: sipEndpointUser,
+    endpoint,
   };
   pendingCalls.set(id, pending);
   setTimeout(() => {
@@ -765,6 +787,34 @@ function sipUser(value: string): string | undefined {
   return match?.[1];
 }
 
+function identityUser(value: string): string | undefined {
+  const user =
+    sipUser(value) ?? value.replace(/^</, "").split("@")[0]?.split(";")[0]?.trim();
+  return user || undefined;
+}
+
+function isKnownSipEndpoint(user: string | undefined): boolean {
+  if (!user) return false;
+  return (
+    callerIdByEndpoint.has(user) ||
+    installationIds.has(user) ||
+    outboundByEndpoint.has(user) ||
+    pendingJoinByEndpoint.has(user)
+  );
+}
+
+function originatingEndpoint(from: string): string | undefined {
+  const user = identityUser(from);
+  return isKnownSipEndpoint(user) ? user : undefined;
+}
+
+function endpointForDid(did: string): string | undefined {
+  for (const [endpoint, callerId] of callerIdByEndpoint) {
+    if (callerId === did) return endpoint;
+  }
+  return undefined;
+}
+
 function normalizeNumber(value: string): string | undefined {
   const raw = value
     .replace(/^sip:/i, "")
@@ -859,9 +909,10 @@ function conferenceParkXml(
   roomId: string,
   callerNumber: string,
   record: boolean,
+  endpoint: string,
 ): string {
   const recording = record
-    ? recordVerb("incoming", callerNumber, sipEndpointUser)
+    ? recordVerb("incoming", callerNumber, endpoint)
     : "";
   return xmlResponse(
     recording +
