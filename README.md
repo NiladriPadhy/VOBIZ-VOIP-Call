@@ -149,5 +149,17 @@ npm audit --omit=dev
 
 The debug APK is generated at `app/build/outputs/apk/debug/app-debug.apk`.
 
+To produce a signed release APK:
+
+```bash
+./scripts/generate-keystore.sh         # creates keystore + updates keystore.properties
+./scripts/build-signed-apk.sh          # builds dist/vobizvoip-<version>-release.apk
+```
+
+The signed APK is copied to `dist/vobizvoip-<version>-release.apk`. See
+`keystore.properties.example` and the script `--help` for environment-variable
+overrides. Back up the keystore and `keystore.properties`; losing them means
+you cannot update an installed release build.
+
 Do not commit Vobiz credentials, Firebase files, TURN credentials, `.env` files, or
 signing keys.

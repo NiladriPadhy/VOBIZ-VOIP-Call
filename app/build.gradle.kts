@@ -1,10 +1,46 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.io.File
+import java.util.Properties
 
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+fun completeSigningProperties(props: Properties): Properties? {
+    val storeFile = props.getProperty("storeFile")
+    val storePassword = props.getProperty("storePassword")
+    val keyAlias = props.getProperty("keyAlias")
+    if (storeFile.isNullOrBlank() || storePassword.isNullOrBlank() || keyAlias.isNullOrBlank()) {
+        return null
+    }
+    if (props.getProperty("keyPassword").isNullOrBlank()) {
+        props.setProperty("keyPassword", storePassword)
+    }
+    return props
+}
+
+fun loadReleaseSigningProperties(): Properties? {
+    val fromEnv = Properties().apply {
+        System.getenv("KEYSTORE_FILE")?.takeIf { it.isNotBlank() }?.let { setProperty("storeFile", it) }
+        System.getenv("KEYSTORE_PASSWORD")?.takeIf { it.isNotBlank() }?.let { setProperty("storePassword", it) }
+        System.getenv("KEY_ALIAS")?.takeIf { it.isNotBlank() }?.let { setProperty("keyAlias", it) }
+        System.getenv("KEY_PASSWORD")?.takeIf { it.isNotBlank() }?.let { setProperty("keyPassword", it) }
+    }
+    completeSigningProperties(fromEnv)?.let { return it }
+
+    val propsFile = rootProject.file("keystore.properties")
+    if (!propsFile.isFile) return null
+    return completeSigningProperties(Properties().apply { propsFile.inputStream().use { load(it) } })
+}
+
+fun resolveKeystoreFile(path: String): File {
+    val candidate = File(path)
+    return if (candidate.isAbsolute) candidate else rootProject.file(path)
+}
+
+val releaseSigningProperties = loadReleaseSigningProperties()
 
 if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
@@ -35,6 +71,18 @@ android {
         buildConfigField("String", "DEBUG_CALLER_ID", "\"\"")
     }
 
+    signingConfigs {
+        if (releaseSigningProperties != null) {
+            create("release") {
+                val props = checkNotNull(releaseSigningProperties)
+                storeFile = resolveKeystoreFile(checkNotNull(props.getProperty("storeFile")))
+                storePassword = checkNotNull(props.getProperty("storePassword"))
+                keyAlias = checkNotNull(props.getProperty("keyAlias"))
+                keyPassword = checkNotNull(props.getProperty("keyPassword"))
+            }
+        }
+    }
+
     buildTypes {
         debug {
             // Debug-only fresh-install defaults so the POC can be tested without
@@ -55,6 +103,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            releaseSigningProperties?.let {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
