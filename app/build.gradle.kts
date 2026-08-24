@@ -40,7 +40,22 @@ fun resolveKeystoreFile(path: String): File {
     return if (candidate.isAbsolute) candidate else rootProject.file(path)
 }
 
+fun loadDebugProperties(): Properties {
+    val props = Properties()
+    val file = rootProject.file("debug.properties")
+    if (file.isFile) {
+        file.inputStream().use { props.load(it) }
+    }
+    return props
+}
+
+fun quoteBuildConfig(value: String?): String {
+    val escaped = (value ?: "").replace("\\", "\\\\").replace("\"", "\\\"")
+    return "\"$escaped\""
+}
+
 val releaseSigningProperties = loadReleaseSigningProperties()
+val debugProperties = loadDebugProperties()
 
 if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
@@ -85,17 +100,33 @@ android {
 
     buildTypes {
         debug {
-            // Debug-only fresh-install defaults so the POC can be tested without
-            // retyping config. Never included in release builds.
-            buildConfigField("String", "DEBUG_SIP_USERNAME", "\"npadhy94954314076727638\"")
-            buildConfigField("String", "DEBUG_SIP_PASSWORD", "\"papu1234\"")
-            buildConfigField("String", "DEBUG_BACKEND_URL", "\"https://bff6-122-176-249-201.ngrok-free.app\"")
+            // Optional local-only defaults from debug.properties (gitignored).
+            // Missing keys stay empty so the repo never ships credentials.
+            buildConfigField(
+                "String",
+                "DEBUG_SIP_USERNAME",
+                quoteBuildConfig(debugProperties.getProperty("DEBUG_SIP_USERNAME")),
+            )
+            buildConfigField(
+                "String",
+                "DEBUG_SIP_PASSWORD",
+                quoteBuildConfig(debugProperties.getProperty("DEBUG_SIP_PASSWORD")),
+            )
+            buildConfigField(
+                "String",
+                "DEBUG_BACKEND_URL",
+                quoteBuildConfig(debugProperties.getProperty("DEBUG_BACKEND_URL")),
+            )
             buildConfigField(
                 "String",
                 "DEBUG_BACKEND_TOKEN",
-                "\"5ae9d5b882875c15ec3c805f55ff08e4bbe21fb28549cb2470385b62f22896ea\"",
+                quoteBuildConfig(debugProperties.getProperty("DEBUG_BACKEND_TOKEN")),
             )
-            buildConfigField("String", "DEBUG_CALLER_ID", "\"+918071581219\"")
+            buildConfigField(
+                "String",
+                "DEBUG_CALLER_ID",
+                quoteBuildConfig(debugProperties.getProperty("DEBUG_CALLER_ID")),
+            )
         }
         release {
             isMinifyEnabled = true

@@ -16,5 +16,6 @@ backend/data/
 *.jks
 *.keystore
 keystore.properties
+debug.properties
 dist/
 *.log

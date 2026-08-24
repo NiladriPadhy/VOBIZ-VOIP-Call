@@ -101,12 +101,16 @@ Do not expose the real webhook token in screenshots or shared logs.
 
 ## 6. Build and install Android
 
+Optional: copy `debug.properties.example` to `debug.properties` and fill in this
+device's SIP, backend, and caller ID values. Debug builds then pre-fill Settings
+on a fresh install. That file is gitignored; do not commit it.
+
 ```bash
 ./gradlew testDebugUnitTest assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Open the app and enter:
+Open the app and enter (or confirm the debug pre-fill):
 
 - this device's SIP endpoint username and password;
 - `wss://registrar.vobiz.ai:5063/`;

@@ -1,0 +1,7 @@
+# Copy to debug.properties (gitignored). Used only by debug builds to pre-fill
+# Settings on a fresh install. Release builds never read this file.
+DEBUG_SIP_USERNAME=
+DEBUG_SIP_PASSWORD=
+DEBUG_BACKEND_URL=
+DEBUG_BACKEND_TOKEN=
+DEBUG_CALLER_ID=
