@@ -90,6 +90,9 @@ https://your-tunnel.example/webhooks/vobiz/<WEBHOOK_TOKEN>/hangup
 Method: POST
 ```
 
+Sample request and response bodies:
+[ANSWER_AND_HANGUP_WEBHOOKS.md](ANSWER_AND_HANGUP_WEBHOOKS.md).
+
 Attach every Vobiz number and every SIP endpoint to this same Voice Application.
 One application and one webhook serve all devices; the backend routes by SIP
 user (outbound) and by called DID (inbound).

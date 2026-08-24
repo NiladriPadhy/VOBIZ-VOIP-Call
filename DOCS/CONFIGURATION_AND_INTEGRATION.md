@@ -112,6 +112,9 @@ Hangup URL:  https://<PUBLIC_URL>/webhooks/vobiz/<WEBHOOK_TOKEN>/hangup
 Method: POST
 ```
 
+Sample request and response bodies:
+[ANSWER_AND_HANGUP_WEBHOOKS.md](ANSWER_AND_HANGUP_WEBHOOKS.md).
+
 ---
 
 ## Integration
