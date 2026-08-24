@@ -14,9 +14,13 @@ The repository contains:
 
 ## Screenshots
 
-| Keypad | Recents | Settings — status | Settings — backend |
-| --- | --- | --- | --- |
-| <img src="screenshots/keypad.png" width="200" alt="Keypad screen with the dialer and SIP connected status" /> | <img src="screenshots/recents.png" width="200" alt="Recents screen listing recent outgoing calls" /> | <img src="screenshots/settings-status.png" width="200" alt="Settings screen showing SIP endpoint and backend status" /> | <img src="screenshots/settings-backend.png" width="200" alt="Settings screen showing backend configuration and call recording toggle" /> |
+| Recents | Keypad | Side menu |
+| --- | --- | --- |
+| <img src="screenshots/recents.png" width="200" alt="Recents screen listing recent incoming and outgoing calls" /> | <img src="screenshots/keypad.png" width="200" alt="Keypad screen with the dialer and Call button" /> | <img src="screenshots/menu.png" width="200" alt="Side menu with Contacts, Settings, and Clear call history" /> |
+
+| Settings — status | Settings — backend | Clear call history |
+| --- | --- | --- |
+| <img src="screenshots/settings-status.png" width="200" alt="Settings screen showing SIP endpoint and backend status" /> | <img src="screenshots/settings-backend.png" width="200" alt="Settings screen showing backend configuration, default country, and call recording toggle" /> | <img src="screenshots/clear-history.png" width="200" alt="Confirmation dialog to clear all call history" /> |
 
 ## Dialer UI
 
