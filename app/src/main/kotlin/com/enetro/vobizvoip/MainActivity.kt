@@ -19,6 +19,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        coordinator.ensureConnectivityMonitoring()
         handleIntent(intent)
         val contactsRepository = (application as VobizApplication).container.contactsRepository
         setContent {

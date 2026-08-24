@@ -4,6 +4,10 @@ import android.content.Context
 import android.content.Intent
 import android.media.Ringtone
 import android.media.RingtoneManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.enetro.vobizvoip.data.AppConfig
@@ -17,6 +21,7 @@ import com.enetro.vobizvoip.data.Recording
 import com.enetro.vobizvoip.data.SecureConfigStore
 import com.enetro.vobizvoip.media.WebRtcAudioSession
 import com.enetro.vobizvoip.service.CallForegroundService
+import com.enetro.vobizvoip.service.ConnectivityMonitorService
 import com.enetro.vobizvoip.telephony.CallStateMonitor
 import com.enetro.vobizvoip.telephony.CellularCallState
 import com.enetro.vobizvoip.telephony.TelephonyInfo
@@ -35,6 +40,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import org.webrtc.PeerConnection
@@ -98,8 +104,17 @@ class CallCoordinator(
     private var incomingInvite: SipMessage? = null
     private var incomingRingtone: Ringtone? = null
     private var inboundStatusJob: Job? = null
+    private var healthMonitorJob: Job? = null
+    private var healthCheckInFlight = false
+    private var lastInstallationId: String? = null
     private var activeCallRecord: ActiveCallRecord? = null
     private var mutedForCellularCall = false
+    private val connectivityManager = context.getSystemService(ConnectivityManager::class.java)
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            scope.launch { onNetworkAvailable() }
+        }
+    }
     private val _recordings = MutableStateFlow<List<Recording>>(emptyList())
     private val _pendingDial = MutableStateFlow<PendingDial?>(null)
 
@@ -163,7 +178,11 @@ class CallCoordinator(
             sipClient.connect(_state.value.config)
             refreshRecordings()
             pushRecordingPreference()
+            startConnectivityMonitoring()
+        } else if (_state.value.config.backendUrl.trim().startsWith("http")) {
+            startConnectivityMonitoring()
         }
+        registerNetworkCallback()
     }
 
     fun saveConfig(config: AppConfig) {
@@ -178,6 +197,7 @@ class CallCoordinator(
         _state.update { it.copy(config = normalized, phase = CallPhase.IDLE, error = null) }
         sipClient.connect(normalized)
         pushRecordingPreference()
+        startConnectivityMonitoring()
     }
 
     fun reconnect() {
@@ -189,49 +209,149 @@ class CallCoordinator(
     }
 
     fun checkBackendHealth() {
+        scope.launch { probeBackendHealth(silent = false) }
+    }
+
+    /** Reconnect SIP and re-check backend health, used by the status notification Retry action. */
+    fun retryConnectivity() {
+        reconnect()
+        checkBackendHealth()
+    }
+
+    /** Starts or resumes health polling, SIP/backend reconnect, and the status notification. */
+    fun ensureConnectivityMonitoring() {
+        val config = _state.value.config
+        if (config.isComplete || config.backendUrl.trim().startsWith("http")) {
+            startConnectivityMonitoring()
+        }
+    }
+
+    private fun startConnectivityMonitoring() {
+        startMonitorService()
+        startHealthMonitor()
+    }
+
+    private fun startMonitorService() {
+        val intent = Intent(context, ConnectivityMonitorService::class.java).apply {
+            action = ConnectivityMonitorService.ACTION_START
+        }
+        try {
+            ContextCompat.startForegroundService(context, intent)
+        } catch (error: Exception) {
+            Log.w("VobizCall", "Unable to start connectivity monitor: ${error.message}")
+        }
+    }
+
+    private fun startHealthMonitor() {
+        healthMonitorJob?.cancel()
+        healthMonitorJob = scope.launch {
+            var offlineStreak = 0
+            while (isActive) {
+                val previous = _state.value.backendHealth.state
+                val health = probeBackendHealth(silent = true)
+                if (health.state == BackendHealthState.ONLINE && previous == BackendHealthState.OFFLINE) {
+                    recoverBackendSession()
+                }
+                if (health.state == BackendHealthState.OFFLINE) {
+                    offlineStreak += 1
+                } else {
+                    offlineStreak = 0
+                }
+                delay(healthRetryDelayMs(health.state, offlineStreak))
+            }
+        }
+    }
+
+    private suspend fun probeBackendHealth(silent: Boolean): BackendHealth {
         val config = _state.value.config
         if (!config.backendUrl.trim().startsWith("http")) {
-            _state.update {
-                it.copy(
-                    backendHealth = BackendHealth(
-                        state = BackendHealthState.OFFLINE,
-                        detail = "Set a backend URL in settings",
-                        checkedAtMillis = System.currentTimeMillis(),
-                    ),
-                )
-            }
-            return
-        }
-        _state.update {
-            it.copy(backendHealth = it.backendHealth.copy(state = BackendHealthState.CHECKING))
-        }
-        scope.launch {
-            val health = try {
-                val report = withTimeout(BACKEND_HEALTH_TIMEOUT_MS) { backendApi.checkHealth(config) }
-                BackendHealth(
-                    state = BackendHealthState.ONLINE,
-                    firebaseReady = report.firebaseReady,
-                    pendingCalls = report.pendingCalls,
-                    checkedAtMillis = System.currentTimeMillis(),
-                )
-            } catch (timeout: TimeoutCancellationException) {
-                BackendHealth(
-                    state = BackendHealthState.OFFLINE,
-                    detail = "No response from backend (timed out)",
-                    checkedAtMillis = System.currentTimeMillis(),
-                )
-            } catch (cancel: CancellationException) {
-                throw cancel
-            } catch (error: Throwable) {
-                Log.w("VobizCall", "Backend health check failed: ${error.message}")
-                BackendHealth(
-                    state = BackendHealthState.OFFLINE,
-                    detail = healthErrorMessage(error),
-                    checkedAtMillis = System.currentTimeMillis(),
-                )
-            }
+            val health = BackendHealth(
+                state = BackendHealthState.OFFLINE,
+                detail = "Set a backend URL in settings",
+                checkedAtMillis = System.currentTimeMillis(),
+            )
             _state.update { it.copy(backendHealth = health) }
+            return health
         }
+        if (healthCheckInFlight) {
+            return _state.value.backendHealth
+        }
+        healthCheckInFlight = true
+        if (!silent) {
+            _state.update {
+                it.copy(backendHealth = it.backendHealth.copy(state = BackendHealthState.CHECKING))
+            }
+        }
+        val health = try {
+            val report = withTimeout(BACKEND_HEALTH_TIMEOUT_MS) { backendApi.checkHealth(config) }
+            BackendHealth(
+                state = BackendHealthState.ONLINE,
+                firebaseReady = report.firebaseReady,
+                pendingCalls = report.pendingCalls,
+                checkedAtMillis = System.currentTimeMillis(),
+            )
+        } catch (timeout: TimeoutCancellationException) {
+            BackendHealth(
+                state = BackendHealthState.OFFLINE,
+                detail = "No response from backend (timed out)",
+                checkedAtMillis = System.currentTimeMillis(),
+            )
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (error: Throwable) {
+            Log.w("VobizCall", "Backend health check failed: ${error.message}")
+            BackendHealth(
+                state = BackendHealthState.OFFLINE,
+                detail = healthErrorMessage(error),
+                checkedAtMillis = System.currentTimeMillis(),
+            )
+        } finally {
+            healthCheckInFlight = false
+        }
+        _state.update { it.copy(backendHealth = health) }
+        return health
+    }
+
+    private fun recoverBackendSession() {
+        val installationId = lastInstallationId
+        if (installationId != null) {
+            registerInstallation(installationId)
+        }
+        pushRecordingPreference()
+        refreshRecordings()
+    }
+
+    private fun onNetworkAvailable() {
+        val config = _state.value.config
+        if (config.isComplete) {
+            val registration = sipClient.registrationState.value
+            if (
+                registration == RegistrationState.DISCONNECTED ||
+                registration == RegistrationState.FAILED
+            ) {
+                sipClient.connect(config)
+            }
+        }
+        if (config.backendUrl.trim().startsWith("http")) {
+            scope.launch { probeBackendHealth(silent = true) }
+        }
+    }
+
+    private fun registerNetworkCallback() {
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+        runCatching {
+            connectivityManager.registerNetworkCallback(request, networkCallback)
+        }.onFailure {
+            Log.w("VobizCall", "Unable to watch network changes: ${it.message}")
+        }
+    }
+
+    private fun healthRetryDelayMs(state: BackendHealthState, offlineStreak: Int): Long {
+        if (state == BackendHealthState.ONLINE) return HEALTH_POLL_OK_MS
+        val shift = (offlineStreak - 1).coerceIn(0, 3)
+        return (HEALTH_RETRY_INITIAL_MS shl shift).coerceAtMost(HEALTH_RETRY_MAX_MS)
     }
 
     private fun healthErrorMessage(error: Throwable): String {
@@ -400,6 +520,7 @@ class CallCoordinator(
     }
 
     fun registerInstallation(installationId: String) {
+        lastInstallationId = installationId
         val config = _state.value.config
         if (!config.isComplete) return
         scope.launch {
@@ -469,8 +590,13 @@ class CallCoordinator(
             }
             SipEvent.CallEnded -> endLocally()
             is SipEvent.Failure -> {
-                val status = event.statusCode?.let { " (SIP $it)" }.orEmpty()
-                fail(event.message + status)
+                val inCall = _state.value.phase in CALL_PHASES
+                if (inCall) {
+                    val status = event.statusCode?.let { " (SIP $it)" }.orEmpty()
+                    fail(event.message + status)
+                } else {
+                    Log.w("VobizCall", "SIP failure while idle: ${event.message}")
+                }
             }
         }
     }
@@ -610,9 +736,20 @@ class CallCoordinator(
 
     private companion object {
         val E164 = Regex("^\\+[1-9]\\d{7,14}$")
+        val CALL_PHASES = setOf(
+            CallPhase.OUTGOING,
+            CallPhase.RINGING,
+            CallPhase.INCOMING,
+            CallPhase.CONNECTING,
+            CallPhase.ACTIVE,
+            CallPhase.ENDING,
+        )
         const val INBOUND_STATUS_POLL_MS = 1_000L
         const val RECORDING_REFRESH_DELAY_MS = 8_000L
         const val BACKEND_HEALTH_TIMEOUT_MS = 6_000L
+        const val HEALTH_POLL_OK_MS = 30_000L
+        const val HEALTH_RETRY_INITIAL_MS = 5_000L
+        const val HEALTH_RETRY_MAX_MS = 30_000L
         val DEFAULT_STUN_SERVERS = listOf(
             "stun:stun.l.google.com:19302",
             "stun:stun.cloudflare.com:3478",

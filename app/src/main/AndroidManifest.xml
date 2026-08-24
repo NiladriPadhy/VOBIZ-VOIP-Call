@@ -9,6 +9,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -100,6 +101,15 @@
             android:name=".service.CallForegroundService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <service
+            android:name=".service.ConnectivityMonitorService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Maintains SIP registration and monitors backend health so inbound VoIP calls can be received." />
+        </service>
     </application>
 
 </manifest>

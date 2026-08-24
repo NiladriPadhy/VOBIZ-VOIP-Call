@@ -3,4 +3,6 @@
     <color name="brand_terracotta">#C9460B</color>
     <color name="window_background">#FAF7F5</color>
     <color name="ic_launcher_background">#C9460B</color>
+    <color name="status_connected">#14B26B</color>
+    <color name="status_disconnected">#E5484D</color>
 </resources>

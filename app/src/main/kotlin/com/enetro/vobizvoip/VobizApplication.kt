@@ -92,6 +92,22 @@ class VobizApplication : Application() {
                     description = "Ongoing Enetro call status"
                     setSound(null, null)
                 },
+                NotificationChannel(
+                    CONNECTIVITY_STATUS_CHANNEL_ID,
+                    getString(R.string.connectivity_status_channel),
+                    NotificationManager.IMPORTANCE_LOW,
+                ).apply {
+                    description = "Persistent SIP and backend connection status"
+                    setSound(null, null)
+                    setShowBadge(false)
+                },
+                NotificationChannel(
+                    CONNECTIVITY_ALERT_CHANNEL_ID,
+                    getString(R.string.connectivity_alert_channel),
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply {
+                    description = "SIP and backend health check changes"
+                },
             ),
         )
     }
@@ -99,6 +115,8 @@ class VobizApplication : Application() {
     companion object {
         const val INCOMING_CHANNEL_ID = "vobiz_incoming_calls_v2"
         const val ACTIVE_CHANNEL_ID = "vobiz_active_calls"
+        const val CONNECTIVITY_STATUS_CHANNEL_ID = "vobiz_connectivity_status"
+        const val CONNECTIVITY_ALERT_CHANNEL_ID = "vobiz_connectivity_alerts"
         private const val LEGACY_INCOMING_CHANNEL_ID = "vobiz_incoming_calls"
     }
 }

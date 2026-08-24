@@ -52,6 +52,10 @@ class SipClient {
     private var socket: WebSocket? = null
     private var registerJob: Job? = null
     private var optionsJob: Job? = null
+    private var reconnectJob: Job? = null
+    private var reconnectAttempt = 0
+    private var userRequestedDisconnect = true
+    private var authRejected = false
     private var nextCSeq = 1
     private var registerCallId = newCallId()
     private var registerFromTag = token(10)
@@ -70,7 +74,25 @@ class SipClient {
     val events: SharedFlow<SipEvent> = _events
 
     fun connect(config: AppConfig) {
-        disconnect()
+        reconnectJob?.cancel()
+        reconnectJob = null
+        userRequestedDisconnect = false
+        authRejected = false
+        beginSession(config)
+    }
+
+    fun disconnect() {
+        userRequestedDisconnect = true
+        reconnectJob?.cancel()
+        reconnectJob = null
+        reconnectAttempt = 0
+        authRejected = false
+        closeSocket()
+        _registrationState.value = RegistrationState.DISCONNECTED
+    }
+
+    private fun beginSession(config: AppConfig) {
+        closeSocket()
         this.config = config
         _registrationState.value = RegistrationState.CONNECTING
         val request = Request.Builder()
@@ -80,19 +102,39 @@ class SipClient {
         socket = httpClient.newWebSocket(request, listener)
     }
 
-    fun disconnect() {
+    private fun closeSocket() {
         registerJob?.cancel()
         registerJob = null
         optionsJob?.cancel()
         optionsJob = null
-        socket?.close(1000, "Client disconnect")
+        val current = socket
         socket = null
+        current?.close(1000, "Client disconnect")
         registeredContactUri = null
         activeDialog = null
         pendingIncomingInvite = null
         lastInvite = null
+        lastAnsweredSdp = null
         cancellationPending = false
-        _registrationState.value = RegistrationState.DISCONNECTED
+    }
+
+    private fun scheduleReconnect() {
+        if (userRequestedDisconnect || authRejected) return
+        if (reconnectJob?.isActive == true) return
+        val current = config ?: return
+        reconnectJob = scope.launch {
+            val delayMs = reconnectDelayMs(reconnectAttempt)
+            Log.i("VobizSip", "Reconnecting in ${delayMs}ms (attempt ${reconnectAttempt + 1})")
+            delay(delayMs)
+            if (userRequestedDisconnect || authRejected) return@launch
+            reconnectAttempt += 1
+            beginSession(current)
+        }
+    }
+
+    private fun reconnectDelayMs(attempt: Int): Long {
+        val shift = attempt.coerceAtMost(5)
+        return (RECONNECT_INITIAL_MS shl shift).coerceAtMost(RECONNECT_MAX_MS)
     }
 
     fun invite(destination: String, localSdp: String) {
@@ -275,7 +317,12 @@ class SipClient {
         registerJob = scope.launch {
             while (isActive) {
                 delay(REGISTRATION_REFRESH_MS)
-                register()
+                runCatching { register() }
+                    .onFailure { error ->
+                        Log.w("VobizSip", "Registration refresh failed: ${error.message}")
+                        scheduleReconnect()
+                        return@launch
+                    }
             }
         }
     }
@@ -288,19 +335,25 @@ class SipClient {
                 val current = config ?: continue
                 if (_registrationState.value != RegistrationState.REGISTERED) continue
                 val uri = "sip:${current.sipUsername}@${current.sipDomain}"
-                send(
-                    SipMessage.request(
-                        "OPTIONS",
-                        uri,
-                        commonRequestHeaders(branch()) + listOf(
-                            "From" to
-                                "<sip:${current.sipUsername}@${current.sipDomain}>;tag=$registerFromTag",
-                            "To" to "<$uri>",
-                            "Call-ID" to newCallId(),
-                            "CSeq" to "${nextCSeq++} OPTIONS",
+                runCatching {
+                    send(
+                        SipMessage.request(
+                            "OPTIONS",
+                            uri,
+                            commonRequestHeaders(branch()) + listOf(
+                                "From" to
+                                    "<sip:${current.sipUsername}@${current.sipDomain}>;tag=$registerFromTag",
+                                "To" to "<$uri>",
+                                "Call-ID" to newCallId(),
+                                "CSeq" to "${nextCSeq++} OPTIONS",
+                            ),
                         ),
-                    ),
-                )
+                    )
+                }.onFailure { error ->
+                    Log.w("VobizSip", "OPTIONS keepalive failed: ${error.message}")
+                    scheduleReconnect()
+                    return@launch
+                }
             }
         }
     }
@@ -319,6 +372,7 @@ class SipClient {
         when {
             method == "REGISTER" && (code == 401 || code == 407) -> {
                 if (registerAuthAttempts >= 1) {
+                    authRejected = true
                     _registrationState.value = RegistrationState.FAILED
                     _events.tryEmit(SipEvent.Failure("SIP credentials were rejected", code))
                     return
@@ -337,13 +391,21 @@ class SipClient {
                         "Path=${response.header("Path") ?: "none"}",
                 )
                 registerAuthAttempts = 0
+                reconnectAttempt = 0
+                authRejected = false
                 _registrationState.value = RegistrationState.REGISTERED
                 scheduleRegistrationRefresh()
                 scheduleOptionsKeepAlive()
             }
             method == "REGISTER" && code >= 300 -> {
+                if (code == 403) {
+                    authRejected = true
+                }
                 _registrationState.value = RegistrationState.FAILED
                 _events.tryEmit(SipEvent.Failure("SIP registration failed", code))
+                if (!authRejected) {
+                    scheduleReconnect()
+                }
             }
             method == "INVITE" && (code == 401 || code == 407) -> {
                 sendFailureAck(response)
@@ -708,16 +770,22 @@ class SipClient {
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            if (webSocket != socket) return
+            socket = null
             _registrationState.value = RegistrationState.DISCONNECTED
             if (activeDialog != null || pendingIncomingInvite != null) {
                 _events.tryEmit(SipEvent.CallEnded)
                 clearDialog()
             }
+            scheduleReconnect()
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            if (webSocket != socket) return
+            socket = null
             _registrationState.value = RegistrationState.FAILED
             _events.tryEmit(SipEvent.Failure(t.message ?: "SIP WebSocket failed"))
+            scheduleReconnect()
         }
     }
 
@@ -739,6 +807,8 @@ class SipClient {
         const val REGISTRATION_SECONDS = 600
         const val REGISTRATION_REFRESH_MS = 450 * 1_000L
         const val OPTIONS_KEEPALIVE_MS = 60_000L
+        const val RECONNECT_INITIAL_MS = 2_000L
+        const val RECONNECT_MAX_MS = 60_000L
         const val USER_AGENT = "vobiz_android_poc"
     }
 }
