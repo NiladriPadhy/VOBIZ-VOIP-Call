@@ -6,8 +6,10 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
-import android.util.Log
 import androidx.core.content.ContextCompat
+// Routes this file's existing Log.w calls through the diagnostic facade so they
+// are captured to the on-device log DB (when enabled) as well as logcat.
+import com.enetro.vobizvoip.data.DiagnosticLog as Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 

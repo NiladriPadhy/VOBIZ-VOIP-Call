@@ -1,7 +1,9 @@
 package com.enetro.vobizvoip.signaling
 
-import android.util.Log
 import com.enetro.vobizvoip.data.AppConfig
+// Routes this file's existing Log.i/Log.w calls through the diagnostic facade so
+// they are captured to the on-device log DB (when enabled) as well as logcat.
+import com.enetro.vobizvoip.data.DiagnosticLog as Log
 import java.security.SecureRandom
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -94,6 +96,7 @@ class SipClient {
     private fun beginSession(config: AppConfig) {
         closeSocket()
         this.config = config
+        registerCallId = newCallId()
         _registrationState.value = RegistrationState.CONNECTING
         val request = Request.Builder()
             .url(config.registrarUrl)
@@ -734,7 +737,10 @@ class SipClient {
         else -> "Call failed with SIP status $code"
     }
 
-    private fun newCallId(): String = "${UUID.randomUUID()}@client.invalid"
+    private fun newCallId(): String {
+        val host = config?.sipDomain?.takeIf { it.isNotBlank() } ?: "registrar.vobiz.ai"
+        return "${UUID.randomUUID()}@$host"
+    }
     private fun branch(): String = "z9hG4bK${token(18)}"
     private fun token(length: Int): String {
         val alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"

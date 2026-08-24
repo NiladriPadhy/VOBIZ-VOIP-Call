@@ -21,6 +21,9 @@ data class AppConfig(
     val backendToken: String = "",
     val callerId: String = "",
     val recordingEnabled: Boolean = true,
+    // Captures verbose runtime diagnostics into an on-device database for
+    // troubleshooting. Off by default; toggled from Settings.
+    val diagnosticLoggingEnabled: Boolean = false,
     // ISO 3166-1 alpha-2 region used to normalize dialed numbers when the device
     // has no SIM (e.g. "IN"). Blank means "let the SIM decide, else fall back".
     val defaultCountryIso: String = "",
@@ -61,6 +64,7 @@ class SecureConfigStore(context: Context) {
                 backendToken = json.optString("backendToken"),
                 callerId = json.optString("callerId"),
                 recordingEnabled = json.optBoolean("recordingEnabled", true),
+                diagnosticLoggingEnabled = json.optBoolean("diagnosticLoggingEnabled", false),
                 defaultCountryIso = json.optString("defaultCountryIso"),
             )
         }.getOrElse { defaultConfig() }
@@ -92,6 +96,7 @@ class SecureConfigStore(context: Context) {
             .put("backendToken", config.backendToken)
             .put("callerId", config.callerId)
             .put("recordingEnabled", config.recordingEnabled)
+            .put("diagnosticLoggingEnabled", config.diagnosticLoggingEnabled)
             .put("defaultCountryIso", config.defaultCountryIso)
             .toString()
         val cipher = Cipher.getInstance(TRANSFORMATION)

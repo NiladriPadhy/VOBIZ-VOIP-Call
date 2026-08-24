@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Settings
@@ -19,12 +20,14 @@ import androidx.compose.ui.unit.dp
 
 /**
  * Side menu matching the reference dialer: a "Phone" header plus Contacts,
- * Settings, and Clear call history. (Help and feedback is intentionally omitted.)
+ * Settings, Diagnostic logs, and Clear call history. (Help and feedback is
+ * intentionally omitted.)
  */
 @Composable
 fun AppDrawer(
     onContacts: () -> Unit,
     onSettings: () -> Unit,
+    onDiagnostics: () -> Unit,
     onClearHistory: () -> Unit,
 ) {
     ModalDrawerSheet {
@@ -47,6 +50,13 @@ fun AppDrawer(
             label = { Text("Settings") },
             selected = false,
             onClick = onSettings,
+            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+        )
+        NavigationDrawerItem(
+            icon = { Icon(Icons.Filled.BugReport, contentDescription = null) },
+            label = { Text("Diagnostic logs") },
+            selected = false,
+            onClick = onDiagnostics,
             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
         )
         NavigationDrawerItem(

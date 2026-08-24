@@ -64,6 +64,8 @@ import com.enetro.vobizvoip.data.AppConfig
 import com.enetro.vobizvoip.data.CallLogEntry
 import com.enetro.vobizvoip.data.Contact
 import com.enetro.vobizvoip.data.ContactsRepository
+import com.enetro.vobizvoip.data.DiagnosticLog
+import com.enetro.vobizvoip.data.DiagnosticLogStore
 import com.enetro.vobizvoip.data.Recording
 import com.enetro.vobizvoip.data.filterByQuery
 import com.enetro.vobizvoip.domain.BackendHealth
@@ -77,7 +79,11 @@ import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.launch
 
 @Composable
-fun RootScreen(coordinator: CallCoordinator, contactsRepository: ContactsRepository) {
+fun RootScreen(
+    coordinator: CallCoordinator,
+    contactsRepository: ContactsRepository,
+    diagnosticLogStore: DiagnosticLogStore,
+) {
     val state by coordinator.state.collectAsStateWithLifecycle()
     val callLog by coordinator.callLog.collectAsStateWithLifecycle()
     val recordings by coordinator.recordings.collectAsStateWithLifecycle()
@@ -110,6 +116,8 @@ fun RootScreen(coordinator: CallCoordinator, contactsRepository: ContactsReposit
     }
 
     val onSaveConfig: (AppConfig) -> Unit = { config ->
+        // Apply the diagnostics toggle immediately so subsequent events persist.
+        DiagnosticLog.enabled = config.diagnosticLoggingEnabled
         coordinator.saveConfig(config)
         requestMissingPermissions(context, permissionLauncher)
         registerForPush(coordinator)
@@ -176,6 +184,7 @@ fun RootScreen(coordinator: CallCoordinator, contactsRepository: ContactsReposit
             recordings = recordings,
             contacts = contacts,
             contactsHasPermission = contactsRepository.hasPermission(),
+            diagnosticLogStore = diagnosticLogStore,
             pendingDial = pendingDial,
             onConsumePendingDial = coordinator::consumePendingDial,
             onRequestContactsPermission = {
@@ -196,7 +205,7 @@ private enum class MainTab(val label: String, val icon: ImageVector) {
     KEYPAD("Keypad", Icons.Filled.Dialpad),
 }
 
-private enum class DrawerScreen { CONTACTS, SETTINGS }
+private enum class DrawerScreen { CONTACTS, SETTINGS, DIAGNOSTIC_LOGS }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -206,6 +215,7 @@ private fun MainShell(
     recordings: List<Recording>,
     contacts: List<Contact>,
     contactsHasPermission: Boolean,
+    diagnosticLogStore: DiagnosticLogStore,
     pendingDial: PendingDial?,
     onConsumePendingDial: () -> Unit,
     onRequestContactsPermission: () -> Unit,
@@ -274,6 +284,10 @@ private fun MainShell(
                     scope.launch { drawerState.close() }
                     drawerScreen = DrawerScreen.SETTINGS
                 },
+                onDiagnostics = {
+                    scope.launch { drawerState.close() }
+                    drawerScreen = DrawerScreen.DIAGNOSTIC_LOGS
+                },
                 onClearHistory = {
                     scope.launch { drawerState.close() }
                     showClearDialog = true
@@ -303,6 +317,16 @@ private fun MainShell(
                     modifier = modifier,
                 )
             }
+
+            DrawerScreen.DIAGNOSTIC_LOGS ->
+                OverlayScaffold("Diagnostic logs", onBack = { drawerScreen = null }) { modifier ->
+                    DiagnosticLogsScreen(
+                        store = diagnosticLogStore,
+                        loggingEnabled = state.config.diagnosticLoggingEnabled,
+                        onOpenSettings = { drawerScreen = DrawerScreen.SETTINGS },
+                        modifier = modifier,
+                    )
+                }
 
             null -> Scaffold(
                 containerColor = MaterialTheme.colorScheme.background,

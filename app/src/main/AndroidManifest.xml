@@ -89,6 +89,17 @@
             android:exported="true"
             android:readPermission="com.enetro.vobizvoip.permission.READ_CALL_LOG" />
 
+        <!-- Shares exported diagnostic log files without exposing a file:// URI. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <service
             android:name=".push.VobizMessagingService"
             android:exported="false">

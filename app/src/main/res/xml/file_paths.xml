@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Exported diagnostic log text files live in cacheDir/diagnostics. -->
+    <cache-path
+        name="diagnostics"
+        path="diagnostics/" />
+</paths>

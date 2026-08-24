@@ -6,22 +6,44 @@ import android.content.Intent
 import androidx.core.app.NotificationCompat
 import com.enetro.vobizvoip.MainActivity
 import com.enetro.vobizvoip.VobizApplication
+import com.enetro.vobizvoip.data.DiagnosticLog
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 
 class VobizMessagingService : FirebaseMessagingService() {
     override fun onRegistered(installationId: String) {
         super.onRegistered(installationId)
+        DiagnosticLog.i(TAG, "FCM onRegistered; installation id refreshed")
         applicationContainer().coordinator.registerInstallation(installationId)
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
-        if (message.data["type"] != "inbound_call") return
-        val pendingCallId = message.data["pendingCallId"] ?: return
+        val type = message.data["type"]
+        if (type != "inbound_call") {
+            DiagnosticLog.d(TAG, "FCM message ignored (type=$type)")
+            return
+        }
+        val pendingCallId = message.data["pendingCallId"]
+        if (pendingCallId == null) {
+            DiagnosticLog.w(TAG, "Inbound FCM missing pendingCallId; ignoring")
+            return
+        }
         val expiresAt = message.data["expiresAt"]?.toLongOrNull() ?: 0L
-        if (expiresAt <= System.currentTimeMillis()) return
+        if (expiresAt <= System.currentTimeMillis()) {
+            DiagnosticLog.w(
+                TAG,
+                "Inbound FCM already expired; ignoring pendingCallId=$pendingCallId",
+            )
+            return
+        }
         val caller = message.data["caller"].orEmpty().ifBlank { "Unknown caller" }
-        if ((application as VobizApplication).isAppInForeground) {
+        val foreground = (application as VobizApplication).isAppInForeground
+        DiagnosticLog.i(
+            TAG,
+            "Inbound call push; pendingCallId=$pendingCallId; caller=$caller; " +
+                "foreground=$foreground",
+        )
+        if (foreground) {
             // App is visible: skip the Answer/Decline notification and bring the
             // in-app calling screen to the front. CallCoordinator plays the
             // default ringtone once the INCOMING state is shown.
@@ -89,5 +111,6 @@ class VobizMessagingService : FirebaseMessagingService() {
 
     private companion object {
         const val INCOMING_TIMEOUT_MS = 30_000L
+        const val TAG = "VobizPush"
     }
 }

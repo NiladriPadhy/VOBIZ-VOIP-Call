@@ -20,7 +20,7 @@ const env = z
     DEVICE_TOKEN: z.string().min(32),
     WEBHOOK_TOKEN: z.string().min(32),
     DEFAULT_COUNTRY_CODE: z.string().regex(/^\d{1,3}$/).default("91"),
-    MAX_CALL_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
+    MAX_CALL_SECONDS: z.coerce.number().int().min(30).max(14400).default(14400),
     VOBIZ_AUTH_ID: z.string().optional(),
     VOBIZ_AUTH_TOKEN: z.string().optional(),
     VOBIZ_API_BASE_URL: z.string().url().default("https://api.vobiz.ai"),
@@ -864,10 +864,12 @@ function recordVerb(
   callback.searchParams.set("dir", direction);
   callback.searchParams.set("num", number);
   callback.searchParams.set("ep", endpoint);
+  // Recording spans the whole session, so bound it by the same MAX_CALL_SECONDS
+  // hard cap that limits connected talk time (defaults to 14400s / 4 hours).
   return (
     `<Record callbackUrl="${xmlEscape(callback.toString())}" callbackMethod="POST" ` +
-    `recordSession="true" redirect="false" maxLength="3600" timeout="3600" ` +
-    `playBeep="false" fileFormat="mp3"/>`
+    `recordSession="true" redirect="false" maxLength="${env.MAX_CALL_SECONDS}" ` +
+    `timeout="${env.MAX_CALL_SECONDS}" playBeep="false" fileFormat="mp3"/>`
   );
 }
 

@@ -9,6 +9,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.core.content.ContextCompat
+import com.enetro.vobizvoip.data.DiagnosticLog
 import com.enetro.vobizvoip.domain.CallCoordinator
 import com.enetro.vobizvoip.ui.RootScreen
 import com.enetro.vobizvoip.ui.theme.VobizTheme
@@ -21,10 +22,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         coordinator.ensureConnectivityMonitoring()
         handleIntent(intent)
-        val contactsRepository = (application as VobizApplication).container.contactsRepository
+        val container = (application as VobizApplication).container
         setContent {
             VobizTheme {
-                RootScreen(coordinator, contactsRepository)
+                RootScreen(
+                    coordinator = coordinator,
+                    contactsRepository = container.contactsRepository,
+                    diagnosticLogStore = container.diagnosticLogStore,
+                )
             }
         }
     }
@@ -36,6 +41,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
+        DiagnosticLog.i("VobizApp", "handleIntent action=${intent?.action ?: "none"}")
         when (intent?.action) {
             ACTION_SHOW_PENDING -> {
                 cancelIncomingNotification(intent)

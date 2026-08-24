@@ -142,18 +142,28 @@ class BackendApi(private val client: OkHttpClient = OkHttpClient()) {
             .header("X-Vobiz-Endpoint", config.sipUsername)
             .method(method, requestBody)
             .build()
+        // Never logs credentials (auth header/token) — only method, path, status, timing.
+        val startedAt = System.currentTimeMillis()
+        DiagnosticLog.i(TAG, "request $method $path")
         val call = client.newCall(request)
         continuation.invokeOnCancellation { call.cancel() }
         call.enqueue(
             object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
+                    DiagnosticLog.w(
+                        TAG,
+                        "request failed $method $path after " +
+                            "${System.currentTimeMillis() - startedAt}ms: ${e.message}",
+                    )
                     if (continuation.isActive) continuation.resumeWithException(e)
                 }
 
                 override fun onResponse(call: Call, response: Response) {
                     response.use {
                         val responseBody = it.body?.string().orEmpty()
+                        val elapsed = System.currentTimeMillis() - startedAt
                         if (!it.isSuccessful) {
+                            DiagnosticLog.w(TAG, "response ${it.code} $method $path (${elapsed}ms)")
                             if (continuation.isActive) {
                                 continuation.resumeWithException(
                                     IOException("Backend returned HTTP ${it.code}"),
@@ -161,6 +171,7 @@ class BackendApi(private val client: OkHttpClient = OkHttpClient()) {
                             }
                             return
                         }
+                        DiagnosticLog.i(TAG, "response ${it.code} $method $path (${elapsed}ms)")
                         val result = if (responseBody.isBlank()) JSONObject() else JSONObject(responseBody)
                         if (continuation.isActive) continuation.resume(result)
                     }
@@ -171,5 +182,6 @@ class BackendApi(private val client: OkHttpClient = OkHttpClient()) {
 
     private companion object {
         val JSON = "application/json; charset=utf-8".toMediaType()
+        const val TAG = "VobizBackend"
     }
 }

@@ -6,10 +6,13 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.media.AudioAttributes
 import android.media.RingtoneManager
+import android.os.Build
 import android.os.Bundle
 import com.enetro.vobizvoip.data.BackendApi
 import com.enetro.vobizvoip.data.CallLogStore
 import com.enetro.vobizvoip.data.ContactsRepository
+import com.enetro.vobizvoip.data.DiagnosticLog
+import com.enetro.vobizvoip.data.DiagnosticLogStore
 import com.enetro.vobizvoip.data.SecureConfigStore
 import com.enetro.vobizvoip.domain.CallCoordinator
 import com.enetro.vobizvoip.media.WebRtcAudioSession
@@ -122,6 +125,26 @@ class VobizApplication : Application() {
 }
 
 class AppContainer(application: Application) {
+    private val configStore = SecureConfigStore(application)
+
+    // On-device diagnostic log database + facade. Installed first so early events
+    // (config load, SIP connect during coordinator construction) are captured when
+    // diagnostic logging is enabled.
+    val diagnosticLogStore = DiagnosticLogStore(application)
+
+    init {
+        DiagnosticLog.install(diagnosticLogStore)
+        DiagnosticLog.enabled = configStore.load().diagnosticLoggingEnabled
+        diagnosticLogStore.pruneToRetention()
+        DiagnosticLog.i(
+            "VobizApp",
+            "App container init; diagnosticLogging=${DiagnosticLog.enabled}; " +
+                "version=${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}); " +
+                "device=${Build.MANUFACTURER} ${Build.MODEL}; " +
+                "android=${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})",
+        )
+    }
+
     // Hoisted so the CallLogProvider (a separate ContentProvider component) can
     // read the same in-memory call history the coordinator writes.
     val callLogStore = CallLogStore(application)
@@ -129,7 +152,7 @@ class AppContainer(application: Application) {
     val callStateMonitor = CallStateMonitor(application)
     val coordinator = CallCoordinator(
         context = application,
-        configStore = SecureConfigStore(application),
+        configStore = configStore,
         sipClient = SipClient(),
         webRtc = WebRtcAudioSession(application),
         backendApi = BackendApi(),

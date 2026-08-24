@@ -8,13 +8,15 @@ import android.database.MatrixCursor
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.provider.BaseColumns
-import android.util.Log
 import com.enetro.vobizvoip.AppContainer
 import com.enetro.vobizvoip.VobizApplication
 import com.enetro.vobizvoip.data.AppConfig
 import com.enetro.vobizvoip.data.CallDirection
 import com.enetro.vobizvoip.data.CallLogEntry
 import com.enetro.vobizvoip.data.CallResult
+// Routes this file's existing Log.w calls through the diagnostic facade so they
+// are captured to the on-device log DB (when enabled) as well as logcat.
+import com.enetro.vobizvoip.data.DiagnosticLog as Log
 import com.enetro.vobizvoip.data.Recording
 import com.enetro.vobizvoip.data.RecordingMatcher
 import okhttp3.OkHttpClient

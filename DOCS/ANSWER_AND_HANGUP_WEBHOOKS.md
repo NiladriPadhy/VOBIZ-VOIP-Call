@@ -72,8 +72,8 @@ Equivalent JSON:
           callbackMethod="POST"
           recordSession="true"
           redirect="false"
-          maxLength="3600"
-          timeout="3600"
+          maxLength="14400"
+          timeout="14400"
           playBeep="false"
           fileFormat="mp3"/>
   <Conference action="https://your-tunnel.example/webhooks/vobiz/TOKEN/conference-events"
@@ -127,8 +127,8 @@ Equivalent JSON:
           callbackMethod="POST"
           recordSession="true"
           redirect="false"
-          maxLength="3600"
-          timeout="3600"
+          maxLength="14400"
+          timeout="14400"
           playBeep="false"
           fileFormat="mp3"/>
   <Dial callerId="+919876543210"

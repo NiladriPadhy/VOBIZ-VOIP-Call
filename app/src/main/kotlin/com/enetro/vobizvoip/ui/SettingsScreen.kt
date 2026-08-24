@@ -44,6 +44,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.enetro.vobizvoip.data.AppConfig
 import com.enetro.vobizvoip.data.CountryCodes
+import com.enetro.vobizvoip.data.DiagnosticLogStore
 import com.enetro.vobizvoip.domain.BackendHealth
 import com.enetro.vobizvoip.domain.BackendHealthState
 import com.enetro.vobizvoip.signaling.RegistrationState
@@ -69,6 +70,9 @@ fun SettingsScreen(
     var backendToken by rememberSaveable(initial) { mutableStateOf(initial.backendToken) }
     var callerId by rememberSaveable(initial) { mutableStateOf(initial.callerId) }
     var recordingEnabled by rememberSaveable(initial) { mutableStateOf(initial.recordingEnabled) }
+    var diagnosticLoggingEnabled by rememberSaveable(initial) {
+        mutableStateOf(initial.diagnosticLoggingEnabled)
+    }
     var countryIso by rememberSaveable(initial) { mutableStateOf(initial.defaultCountryIso) }
 
     val isValid = username.isNotBlank() &&
@@ -135,6 +139,30 @@ fun SettingsScreen(
             }
         }
 
+        SectionCard(title = "DIAGNOSTICS") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = "Diagnostic logs",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = "Record detailed activity on this device to help track down " +
+                            "issues. Stored for ${DiagnosticLogStore.RETENTION_DAYS} days, then " +
+                            "removed. View or share them from the Diagnostic logs menu.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Switch(
+                    checked = diagnosticLoggingEnabled,
+                    onCheckedChange = { diagnosticLoggingEnabled = it },
+                )
+            }
+        }
+
         Text(
             text = "Credentials are encrypted with the Android Keystore and never leave this device.",
             style = MaterialTheme.typography.bodySmall,
@@ -154,6 +182,7 @@ fun SettingsScreen(
                         backendToken = backendToken,
                         callerId = callerId,
                         recordingEnabled = recordingEnabled,
+                        diagnosticLoggingEnabled = diagnosticLoggingEnabled,
                         defaultCountryIso = countryIso,
                     ),
                 )

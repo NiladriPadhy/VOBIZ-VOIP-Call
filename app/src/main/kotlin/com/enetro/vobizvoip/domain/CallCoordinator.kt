@@ -8,7 +8,6 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
-import android.util.Log
 import androidx.core.content.ContextCompat
 import com.enetro.vobizvoip.data.AppConfig
 import com.enetro.vobizvoip.data.BackendApi
@@ -17,6 +16,9 @@ import com.enetro.vobizvoip.data.CallLogEntry
 import com.enetro.vobizvoip.data.CallLogStore
 import com.enetro.vobizvoip.data.CallResult
 import com.enetro.vobizvoip.data.CountryCodes
+// Routes this file's existing Log.i/Log.w calls through the diagnostic facade so
+// they are captured to the on-device log DB (when enabled) as well as logcat.
+import com.enetro.vobizvoip.data.DiagnosticLog as Log
 import com.enetro.vobizvoip.data.Recording
 import com.enetro.vobizvoip.data.SecureConfigStore
 import com.enetro.vobizvoip.media.WebRtcAudioSession
