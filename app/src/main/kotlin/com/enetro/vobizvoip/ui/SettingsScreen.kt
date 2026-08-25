@@ -40,13 +40,18 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.enetro.vobizvoip.data.AppConfig
 import com.enetro.vobizvoip.data.CountryCodes
 import com.enetro.vobizvoip.data.DiagnosticLogStore
 import com.enetro.vobizvoip.domain.BackendHealth
 import com.enetro.vobizvoip.domain.BackendHealthState
+import com.enetro.vobizvoip.service.InboundCallGuards
 import com.enetro.vobizvoip.signaling.RegistrationState
 import com.enetro.vobizvoip.ui.theme.AnswerGreen
 import com.enetro.vobizvoip.ui.theme.DeclineRed
@@ -99,6 +104,8 @@ fun SettingsScreen(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             BackendStatusRow(health = backendHealth, onRefresh = onCheckBackend)
         }
+
+        InboundSleepCard()
 
         SectionCard(title = "SIP ENDPOINT") {
             SettingsField("SIP username", username) { username = it }
@@ -195,6 +202,76 @@ fun SettingsScreen(
             Text("Save and connect")
         }
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun InboundSleepCard() {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var status by remember { mutableStateOf(InboundCallGuards.status(context)) }
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            status = InboundCallGuards.status(context)
+        }
+    }
+    SectionCard(title = "INBOUND WHILE ASLEEP") {
+        InboundGuardRow(
+            title = "Notifications",
+            ok = status.notificationsEnabled,
+            detailOn = "Allowed — incoming calls can alert",
+            detailOff = "Off — enable so inbound calls can ring",
+            onClick = { InboundCallGuards.openNotificationSettings(context) },
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        InboundGuardRow(
+            title = "Full-screen incoming calls",
+            ok = status.fullScreenIntentAllowed,
+            detailOn = "Allowed — lock screen can show the call",
+            detailOff = "Off — tap to allow the incoming-call screen",
+            onClick = { InboundCallGuards.openFullScreenIntentSettings(context) },
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        InboundGuardRow(
+            title = "Battery usage",
+            ok = status.batteryUnrestricted,
+            detailOn = "Unrestricted — sleep will not delay the push",
+            detailOff = "Restricted — tap to allow unrestricted battery",
+            onClick = { InboundCallGuards.openBatterySettings(context) },
+        )
+    }
+}
+
+@Composable
+private fun InboundGuardRow(
+    title: String,
+    ok: Boolean,
+    detailOn: String,
+    detailOff: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = if (ok) detailOn else detailOff,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        StatusChip(
+            label = if (ok) "Ready" else "Fix",
+            dotColor = if (ok) AnswerGreen else WarningAmber,
+        )
     }
 }
 

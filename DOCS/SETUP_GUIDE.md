@@ -68,6 +68,12 @@ Expose port 3000 using the selected tunnel. For example:
 ngrok http 3000
 ```
 
+If the backend runs on a laptop via the `com.vobizvoip.backend` LaunchAgent,
+install or refresh it with `backend/scripts/install-launch-agent.sh`. That
+wraps the process in `caffeinate -i -s` so idle sleep does not freeze the API
+(the phone then reports the backend offline until the laptop wakes). Closing
+the lid still sleeps the machine.
+
 Update `PUBLIC_URL` whenever the tunnel URL changes, then restart the backend.
 
 Verify:

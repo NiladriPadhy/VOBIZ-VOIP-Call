@@ -24,6 +24,9 @@ import com.enetro.vobizvoip.data.SecureConfigStore
 import com.enetro.vobizvoip.media.WebRtcAudioSession
 import com.enetro.vobizvoip.service.CallForegroundService
 import com.enetro.vobizvoip.service.ConnectivityMonitorService
+import com.enetro.vobizvoip.service.IncomingCallPresenter
+import com.enetro.vobizvoip.service.IncomingCallWake
+import com.enetro.vobizvoip.telecom.IncomingCallAccount
 import com.enetro.vobizvoip.telephony.CallStateMonitor
 import com.enetro.vobizvoip.telephony.CellularCallState
 import com.enetro.vobizvoip.telephony.TelephonyInfo
@@ -475,25 +478,30 @@ class CallCoordinator(
     }
 
     fun showPendingInbound(pendingCallId: String, caller: String?) {
+        val remote = caller ?: "Unknown caller"
         activeCallRecord = ActiveCallRecord(
-            number = caller ?: "Unknown caller",
+            number = remote,
             direction = CallDirection.INCOMING,
             startedAt = System.currentTimeMillis(),
         )
         _state.update {
             it.copy(
                 phase = CallPhase.INCOMING,
-                remoteNumber = caller ?: "Unknown caller",
+                remoteNumber = remote,
                 pendingCallId = pendingCallId,
                 error = null,
             )
         }
+        IncomingCallPresenter.keepAwakeForIncoming(context, remote, pendingCallId)
+        ensureSipConnected()
         startIncomingRingtone()
+        startInboundStatusPolling()
     }
 
     fun acceptPendingInbound() {
         val pendingId = _state.value.pendingCallId ?: return
         stopIncomingRingtone()
+        ensureSipConnected()
         scope.launch {
             runCatching {
                 val config = _state.value.config
@@ -577,6 +585,7 @@ class CallCoordinator(
                         error = null,
                     )
                 }
+                IncomingCallPresenter.keepAwakeForIncoming(context, event.caller)
                 startIncomingRingtone()
                 startInboundStatusPolling()
             }
@@ -608,7 +617,21 @@ class CallCoordinator(
         val connectedAt = System.currentTimeMillis()
         activeCallRecord?.connectedAt = connectedAt
         _state.update { it.copy(phase = CallPhase.ACTIVE, connectedAtMillis = connectedAt) }
+        IncomingCallAccount.setActive()
+        IncomingCallWake.release()
         startCallService()
+    }
+
+    private fun ensureSipConnected() {
+        val config = _state.value.config
+        if (!config.isComplete) return
+        when (sipClient.registrationState.value) {
+            RegistrationState.REGISTERED,
+            RegistrationState.CONNECTING,
+            RegistrationState.REGISTERING,
+            -> return
+            else -> sipClient.connect(config)
+        }
     }
 
     private fun startCallService() {
@@ -634,6 +657,7 @@ class CallCoordinator(
         inboundStatusJob = null
         stopIncomingRingtone()
         webRtc.close()
+        IncomingCallPresenter.finished(context, _state.value.pendingCallId)
         stopCallService()
         incomingInvite = null
         recordCall(result)
@@ -654,6 +678,7 @@ class CallCoordinator(
         inboundStatusJob = null
         stopIncomingRingtone()
         webRtc.close()
+        IncomingCallPresenter.finished(context, _state.value.pendingCallId)
         stopCallService()
         recordCall(CallResult.FAILED)
         _state.update { it.copy(phase = CallPhase.FAILED, error = message, connectedAtMillis = null) }

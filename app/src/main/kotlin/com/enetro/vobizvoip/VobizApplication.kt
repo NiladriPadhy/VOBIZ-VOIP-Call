@@ -17,6 +17,7 @@ import com.enetro.vobizvoip.data.SecureConfigStore
 import com.enetro.vobizvoip.domain.CallCoordinator
 import com.enetro.vobizvoip.media.WebRtcAudioSession
 import com.enetro.vobizvoip.signaling.SipClient
+import com.enetro.vobizvoip.telecom.IncomingCallAccount
 import com.enetro.vobizvoip.telephony.CallStateMonitor
 
 class VobizApplication : Application() {
@@ -32,6 +33,7 @@ class VobizApplication : Application() {
         createNotificationChannels()
         registerForegroundTracker()
         container = AppContainer(this)
+        IncomingCallAccount.register(this)
     }
 
     /**

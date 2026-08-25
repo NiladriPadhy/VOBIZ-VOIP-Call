@@ -73,6 +73,7 @@ import com.enetro.vobizvoip.domain.CallCoordinator
 import com.enetro.vobizvoip.domain.CallPhase
 import com.enetro.vobizvoip.domain.CallUiState
 import com.enetro.vobizvoip.domain.PendingDial
+import com.enetro.vobizvoip.service.InboundCallGuards
 import com.enetro.vobizvoip.signaling.RegistrationState
 import com.google.firebase.installations.FirebaseInstallations
 import com.google.firebase.messaging.FirebaseMessaging
@@ -93,6 +94,8 @@ fun RootScreen(
     val scope = rememberCoroutineScope()
 
     var pendingAudioAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var inboundPromptDismissed by rememberSaveable { mutableStateOf(false) }
+    val inboundGuards = remember(state.config.isComplete) { InboundCallGuards.status(context) }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { results ->
@@ -139,6 +142,35 @@ fun RootScreen(
         if (state.config.isComplete) {
             registerForPush(coordinator)
         }
+    }
+
+    if (
+        state.config.isComplete &&
+        !inboundPromptDismissed &&
+        !inboundGuards.ready &&
+        state.phase == CallPhase.IDLE
+    ) {
+        AlertDialog(
+            onDismissRequest = { inboundPromptDismissed = true },
+            title = { Text("Receive calls when the screen is off") },
+            text = {
+                Text(
+                    "Allow full-screen incoming calls and unrestricted battery so a " +
+                        "call can wake this phone.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        inboundPromptDismissed = true
+                        InboundCallGuards.openFirstMissingSetting(context)
+                    },
+                ) { Text("Fix") }
+            },
+            dismissButton = {
+                TextButton(onClick = { inboundPromptDismissed = true }) { Text("Later") }
+            },
+        )
     }
 
     when {

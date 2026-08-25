@@ -1,6 +1,7 @@
 package com.enetro.vobizvoip
 
 import android.Manifest
+import android.app.KeyguardManager
 import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -11,6 +12,7 @@ import androidx.activity.compose.setContent
 import androidx.core.content.ContextCompat
 import com.enetro.vobizvoip.data.DiagnosticLog
 import com.enetro.vobizvoip.domain.CallCoordinator
+import com.enetro.vobizvoip.service.IncomingCallPresenter
 import com.enetro.vobizvoip.ui.RootScreen
 import com.enetro.vobizvoip.ui.theme.VobizTheme
 
@@ -20,6 +22,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        unlockForIncoming(intent)
         coordinator.ensureConnectivityMonitoring()
         handleIntent(intent)
         val container = (application as VobizApplication).container
@@ -37,6 +40,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        unlockForIncoming(intent)
         handleIntent(intent)
     }
 
@@ -90,9 +94,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun cancelIncomingNotification(intent: Intent) {
+        IncomingCallPresenter.cancelHeadsUp(this, intent.getStringExtra(EXTRA_PENDING_CALL_ID))
         intent.getStringExtra(EXTRA_PENDING_CALL_ID)?.let {
             getSystemService(NotificationManager::class.java).cancel(it.hashCode())
         }
+    }
+
+    private fun unlockForIncoming(intent: Intent?) {
+        if (intent?.action !in INCOMING_ACTIONS) return
+        setShowWhenLocked(true)
+        setTurnScreenOn(true)
+        getSystemService(KeyguardManager::class.java).requestDismissKeyguard(this, null)
     }
 
     companion object {
@@ -106,5 +118,11 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_PENDING_CALL_ID = "pendingCallId"
         const val EXTRA_CALLER = "caller"
         const val EXTRA_NUMBER = "number"
+
+        private val INCOMING_ACTIONS = setOf(
+            ACTION_SHOW_PENDING,
+            ACTION_ANSWER_PENDING,
+            ACTION_DECLINE_PENDING,
+        )
     }
 }

@@ -30,4 +30,17 @@
     <string name="connectivity_alert_combined_title">Connection status</string>
     <string name="call_log_permission_label">Read Enetro VoIP call log</string>
     <string name="call_log_permission_description">Allows the app to read Enetro VoIP call history and recordings.</string>
+    <string name="inbound_sleep_title">Calls while the screen is off</string>
+    <string name="inbound_sleep_body">Allow full-screen incoming calls and unrestricted battery so a call can wake this phone.</string>
+    <string name="inbound_sleep_fix">Fix</string>
+    <string name="inbound_sleep_later">Later</string>
+    <string name="inbound_guard_notifications">Notifications</string>
+    <string name="inbound_guard_notifications_on">Allowed — incoming calls can alert</string>
+    <string name="inbound_guard_notifications_off">Off — enable so inbound calls can ring</string>
+    <string name="inbound_guard_fullscreen">Full-screen incoming calls</string>
+    <string name="inbound_guard_fullscreen_on">Allowed — lock screen can show the call</string>
+    <string name="inbound_guard_fullscreen_off">Off — tap to allow the incoming-call screen</string>
+    <string name="inbound_guard_battery">Battery usage</string>
+    <string name="inbound_guard_battery_on">Unrestricted — sleep will not delay the push</string>
+    <string name="inbound_guard_battery_off">Restricted — tap to allow unrestricted battery</string>
 </resources>
