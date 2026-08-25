@@ -4,8 +4,6 @@ import android.app.Activity
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.media.AudioAttributes
-import android.media.RingtoneManager
 import android.os.Build
 import android.os.Bundle
 import com.enetro.vobizvoip.data.BackendApi
@@ -70,13 +68,9 @@ class VobizApplication : Application() {
 
     private fun createNotificationChannels() {
         val manager = getSystemService(NotificationManager::class.java)
-        // Legacy channel had no ringtone sound; drop it so the new call ring applies.
-        manager.deleteNotificationChannel(LEGACY_INCOMING_CHANNEL_ID)
-        val ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-        val ringtoneAttributes = AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            .build()
+        // Previous incoming channels played their own ringtone and stacked with
+        // IncomingCallRinger on lock-screen / killed-process presentation.
+        LEGACY_INCOMING_CHANNEL_IDS.forEach(manager::deleteNotificationChannel)
         manager.createNotificationChannels(
             listOf(
                 NotificationChannel(
@@ -87,7 +81,7 @@ class VobizApplication : Application() {
                     description = "Incoming Enetro call alerts"
                     lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
                     enableVibration(true)
-                    setSound(ringtoneUri, ringtoneAttributes)
+                    setSound(null, null)
                 },
                 NotificationChannel(
                     ACTIVE_CHANNEL_ID,
@@ -118,11 +112,14 @@ class VobizApplication : Application() {
     }
 
     companion object {
-        const val INCOMING_CHANNEL_ID = "vobiz_incoming_calls_v2"
+        const val INCOMING_CHANNEL_ID = "vobiz_incoming_calls_v3"
         const val ACTIVE_CHANNEL_ID = "vobiz_active_calls"
         const val CONNECTIVITY_STATUS_CHANNEL_ID = "vobiz_connectivity_status"
         const val CONNECTIVITY_ALERT_CHANNEL_ID = "vobiz_connectivity_alerts"
-        private const val LEGACY_INCOMING_CHANNEL_ID = "vobiz_incoming_calls"
+        private val LEGACY_INCOMING_CHANNEL_IDS = listOf(
+            "vobiz_incoming_calls",
+            "vobiz_incoming_calls_v2",
+        )
     }
 }
 

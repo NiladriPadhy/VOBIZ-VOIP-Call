@@ -8,6 +8,10 @@ import androidx.core.app.NotificationCompat
 import com.enetro.vobizvoip.MainActivity
 import com.enetro.vobizvoip.VobizApplication
 
+/**
+ * Incoming-call UI only. The channel is silent; [IncomingCallRinger] plays the ring
+ * so lock-screen Telecom + FGS notifications cannot stack two sounds.
+ */
 object IncomingCallNotifications {
     fun build(context: Context, pendingCallId: String, caller: String): Notification {
         val showIntent = callIntent(context, MainActivity.ACTION_SHOW_PENDING, pendingCallId, caller)
@@ -22,6 +26,7 @@ object IncomingCallNotifications {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(true)
             .setAutoCancel(false)
+            .setOnlyAlertOnce(true)
             .setFullScreenIntent(showIntent, true)
             .setContentIntent(showIntent)
             .addAction(0, "Decline", declineIntent)

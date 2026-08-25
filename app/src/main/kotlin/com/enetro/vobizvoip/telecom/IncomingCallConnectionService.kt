@@ -51,7 +51,7 @@ class IncomingCallConnectionService : ConnectionService() {
         }
 
         override fun onShowIncomingCallUi() {
-            IncomingCallPresenter.notifyIncoming(this@IncomingCallConnectionService, pendingCallId, caller)
+            IncomingCallPresenter.ensureIncomingUi(this@IncomingCallConnectionService, pendingCallId, caller)
         }
 
         override fun onAnswer() {

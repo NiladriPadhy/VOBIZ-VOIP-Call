@@ -5,7 +5,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import com.enetro.vobizvoip.MainActivity
 import com.enetro.vobizvoip.R
@@ -24,16 +23,14 @@ class ConnectivityNotifier(private val context: Context) {
         val sip = sipLabel(registration)
         val backend = backendLabel(health.state)
         val text = context.getString(R.string.connectivity_persistent_text, sip, backend)
-        val sipConnected = ConnectivityAlerts.isSipConnected(registration)
-        val backendConnected = ConnectivityAlerts.isBackendConnected(health.state)
-        val content = statusRemoteViews(sip, backend, sipConnected, backendConnected)
+        val expanded = context.getString(R.string.connectivity_persistent_sip, sip) +
+            "\n" +
+            context.getString(R.string.connectivity_persistent_backend, backend)
         val builder = NotificationCompat.Builder(context, VobizApplication.CONNECTIVITY_STATUS_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_phone_call)
             .setContentTitle(context.getString(R.string.connectivity_persistent_title))
             .setContentText(text)
-            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
-            .setCustomContentView(content)
-            .setCustomBigContentView(content)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(expanded))
             .setContentIntent(openAppIntent())
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -48,36 +45,6 @@ class ConnectivityNotifier(private val context: Context) {
             )
         }
         return builder.build()
-    }
-
-    private fun statusRemoteViews(
-        sip: String,
-        backend: String,
-        sipConnected: Boolean,
-        backendConnected: Boolean,
-    ): RemoteViews {
-        return RemoteViews(context.packageName, R.layout.notification_connectivity).apply {
-            setImageViewResource(
-                R.id.sip_status_dot,
-                if (sipConnected) R.drawable.ic_status_connected else R.drawable.ic_status_disconnected,
-            )
-            setTextViewText(
-                R.id.sip_status_text,
-                context.getString(R.string.connectivity_persistent_sip, sip),
-            )
-            setImageViewResource(
-                R.id.backend_status_dot,
-                if (backendConnected) {
-                    R.drawable.ic_status_connected
-                } else {
-                    R.drawable.ic_status_disconnected
-                },
-            )
-            setTextViewText(
-                R.id.backend_status_text,
-                context.getString(R.string.connectivity_persistent_backend, backend),
-            )
-        }
     }
 
     private fun retryIntent(): PendingIntent = PendingIntent.getForegroundService(

@@ -2,8 +2,6 @@ package com.enetro.vobizvoip.domain
 
 import android.content.Context
 import android.content.Intent
-import android.media.Ringtone
-import android.media.RingtoneManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -25,6 +23,7 @@ import com.enetro.vobizvoip.media.WebRtcAudioSession
 import com.enetro.vobizvoip.service.CallForegroundService
 import com.enetro.vobizvoip.service.ConnectivityMonitorService
 import com.enetro.vobizvoip.service.IncomingCallPresenter
+import com.enetro.vobizvoip.service.IncomingCallRinger
 import com.enetro.vobizvoip.service.IncomingCallWake
 import com.enetro.vobizvoip.telecom.IncomingCallAccount
 import com.enetro.vobizvoip.telephony.CallStateMonitor
@@ -107,7 +106,6 @@ class CallCoordinator(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val _state = MutableStateFlow(CallUiState(config = configStore.load()))
     private var incomingInvite: SipMessage? = null
-    private var incomingRingtone: Ringtone? = null
     private var inboundStatusJob: Job? = null
     private var healthMonitorJob: Job? = null
     private var healthCheckInFlight = false
@@ -430,7 +428,7 @@ class CallCoordinator(
 
     fun acceptIncoming() {
         val invite = incomingInvite ?: return
-        stopIncomingRingtone()
+        IncomingCallRinger.stop()
         _state.update { it.copy(phase = CallPhase.CONNECTING, error = null) }
         scope.launch {
             runCatching {
@@ -445,7 +443,7 @@ class CallCoordinator(
     }
 
     fun rejectIncoming() {
-        stopIncomingRingtone()
+        IncomingCallRinger.stop()
         sipClient.rejectIncoming()
         endLocally(CallResult.DECLINED)
     }
@@ -494,13 +492,12 @@ class CallCoordinator(
         }
         IncomingCallPresenter.keepAwakeForIncoming(context, remote, pendingCallId)
         ensureSipConnected()
-        startIncomingRingtone()
         startInboundStatusPolling()
     }
 
     fun acceptPendingInbound() {
         val pendingId = _state.value.pendingCallId ?: return
-        stopIncomingRingtone()
+        IncomingCallRinger.stop()
         ensureSipConnected()
         scope.launch {
             runCatching {
@@ -522,7 +519,7 @@ class CallCoordinator(
 
     fun declinePendingInbound() {
         val pendingId = _state.value.pendingCallId ?: return
-        stopIncomingRingtone()
+        IncomingCallRinger.stop()
         scope.launch {
             runCatching { backendApi.declinePending(_state.value.config, pendingId) }
             endLocally(CallResult.DECLINED)
@@ -586,7 +583,6 @@ class CallCoordinator(
                     )
                 }
                 IncomingCallPresenter.keepAwakeForIncoming(context, event.caller)
-                startIncomingRingtone()
                 startInboundStatusPolling()
             }
             SipEvent.RemoteRinging -> _state.update { it.copy(phase = CallPhase.RINGING) }
@@ -655,7 +651,7 @@ class CallCoordinator(
     private fun endLocally(result: CallResult? = null) {
         inboundStatusJob?.cancel()
         inboundStatusJob = null
-        stopIncomingRingtone()
+        IncomingCallRinger.stop()
         webRtc.close()
         IncomingCallPresenter.finished(context, _state.value.pendingCallId)
         stopCallService()
@@ -676,7 +672,7 @@ class CallCoordinator(
     private fun fail(message: String) {
         inboundStatusJob?.cancel()
         inboundStatusJob = null
-        stopIncomingRingtone()
+        IncomingCallRinger.stop()
         webRtc.close()
         IncomingCallPresenter.finished(context, _state.value.pendingCallId)
         stopCallService()
@@ -737,23 +733,6 @@ class CallCoordinator(
                 }
             }
         }
-    }
-
-    private fun startIncomingRingtone() {
-        if (incomingRingtone?.isPlaying == true) return
-        runCatching {
-            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-            RingtoneManager.getRingtone(context, uri)?.also { ringtone ->
-                ringtone.isLooping = true
-                ringtone.play()
-                incomingRingtone = ringtone
-            }
-        }
-    }
-
-    private fun stopIncomingRingtone() {
-        incomingRingtone?.stop()
-        incomingRingtone = null
     }
 
     private fun iceServers(): List<PeerConnection.IceServer> =
