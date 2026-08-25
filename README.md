@@ -1,6 +1,6 @@
-# Vobiz VoIP POC
+# Vobiz VoIP Dialer
 
-Native Kotlin Android proof of concept for inbound and outbound PSTN calls through
+Native Kotlin Android app for inbound and outbound PSTN calls through
 Vobiz using SIP over secure WebSocket and WebRTC audio.
 
 The repository contains:
